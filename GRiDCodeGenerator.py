@@ -12,7 +12,8 @@ class GRiDCodeGenerator:
                          gen_XImats_helpers_temp_shared_memory_code, gen_load_update_XImats_helpers, gen_topology_helpers_size, \
                          gen_get_Xhom_size, gen_load_update_XmatsHom_helpers, gen_load_update_XmatsHom_helpers_function_call, gen_XmatsHom_helpers_temp_shared_memory_code, \
                          gen_topology_sparsity_helpers_python, gen_init_topology_helpers, gen_topology_helpers_pointers_for_cpp, \
-                         gen_insert_helpers_function_call, gen_insert_helpers_func_def_params, gen_init_robotModel
+                         gen_insert_helpers_function_call, gen_insert_helpers_func_def_params, gen_init_robotModel, \
+                         gen_invert_matrix
 
     # then import all of the algorithms
     from .algorithms import gen_inverse_dynamics_inner_temp_mem_size, gen_inverse_dynamics_inner_function_call, \
@@ -178,32 +179,52 @@ class GRiDCodeGenerator:
         self.gen_add_code_line("template <typename T>")
         self.gen_add_code_line("__host__")
         self.gen_add_code_line("cudaStream_t *init_grid(){", True)
-        self.gen_add_code_lines(["// set the max temp memory for the gradient kernels to account for large robots", \
-                                 "auto id_kern1 = static_cast<void (*)(T *, const T *, const int, const T *, const robotModel<T> *, const T, const int)>(&inverse_dynamics_gradient_kernel<T>);", \
-                                 "auto id_kern2 = static_cast<void (*)(T *, const T *, const int, const robotModel<T> *, const T, const int)>(&inverse_dynamics_gradient_kernel<T>);", \
-                                 "auto id_kern_timing1 = static_cast<void (*)(T *, const T *, const int, const T *, const robotModel<T> *, const T, const int)>(&inverse_dynamics_gradient_kernel_single_timing<T>);", \
-                                 "auto id_kern_timing2 = static_cast<void (*)(T *, const T *, const int, const robotModel<T> *, const T, const int)>(&inverse_dynamics_gradient_kernel_single_timing<T>);", \
-                                 "auto fd_kern1 = static_cast<void (*)(T *, const T *, const int, const T *, const T *, const robotModel<T> *, const T, const int)>(&forward_dynamics_gradient_kernel<T>);", \
-                                 "auto fd_kern2 = static_cast<void (*)(T *, const T *, const int, const robotModel<T> *, const T, const int)>(&forward_dynamics_gradient_kernel<T>);", \
-                                 "auto fd_kern_timing1 = static_cast<void (*)(T *, const T *, const int, const T *, const T *, const robotModel<T> *, const T, const int)>(&forward_dynamics_gradient_kernel_single_timing<T>);", \
-                                 "auto fd_kern_timing2 = static_cast<void (*)(T *, const T *, const int, const robotModel<T> *, const T, const int)>(&forward_dynamics_gradient_kernel_single_timing<T>);", \
-                                 "cudaFuncSetAttribute(id_kern1,cudaFuncAttributeMaxDynamicSharedMemorySize, ID_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
-                                 "cudaFuncSetAttribute(id_kern2,cudaFuncAttributeMaxDynamicSharedMemorySize, ID_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
-                                 "cudaFuncSetAttribute(id_kern_timing1,cudaFuncAttributeMaxDynamicSharedMemorySize, ID_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
-                                 "cudaFuncSetAttribute(id_kern_timing2,cudaFuncAttributeMaxDynamicSharedMemorySize, ID_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
-                                 "cudaFuncSetAttribute(fd_kern1,cudaFuncAttributeMaxDynamicSharedMemorySize, FD_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
-                                 "cudaFuncSetAttribute(fd_kern2,cudaFuncAttributeMaxDynamicSharedMemorySize, FD_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
-                                 "cudaFuncSetAttribute(fd_kern_timing1,cudaFuncAttributeMaxDynamicSharedMemorySize, FD_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
-                                 "cudaFuncSetAttribute(fd_kern_timing2,cudaFuncAttributeMaxDynamicSharedMemorySize, FD_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
-                                 "gpuErrchk(cudaDeviceSynchronize());", \
-                                 "// allocate streams", \
-                                 "cudaStream_t *streams = (cudaStream_t *)malloc(" + str(MAX_STREAMS) + "*sizeof(cudaStream_t));", \
-                                 "int priority, minPriority, maxPriority;", \
-                                 "gpuErrchk(cudaDeviceGetStreamPriorityRange(&minPriority, &maxPriority));", \
-                                 "for(int i=0; i<" + str(MAX_STREAMS) + "; i++){", \
-                                 "    int adjusted_max = maxPriority - i; priority = adjusted_max > minPriority ? adjusted_max : minPriority;", \
-                                 "    gpuErrchk(cudaStreamCreateWithPriority(&(streams[i]),cudaStreamNonBlocking,priority));", \
-                                 "}", "return streams;"])
+        if self.robot.floating_base:
+            self.gen_add_code_lines(["// set the max temp memory for the gradient kernels to account for large robots", \
+                                    "auto id_kern1 = static_cast<void (*)(T *, const T *, const int, const T *, const robotModel<T> *, const T, const int)>(&inverse_dynamics_gradient_kernel<T>);", \
+                                    "auto id_kern2 = static_cast<void (*)(T *, const T *, const int, const robotModel<T> *, const T, const int)>(&inverse_dynamics_gradient_kernel<T>);", \
+                                    "auto id_kern_timing1 = static_cast<void (*)(T *, const T *, const int, const T *, const robotModel<T> *, const T, const int)>(&inverse_dynamics_gradient_kernel_single_timing<T>);", \
+                                    "auto id_kern_timing2 = static_cast<void (*)(T *, const T *, const int, const robotModel<T> *, const T, const int)>(&inverse_dynamics_gradient_kernel_single_timing<T>);", \
+                                    "cudaFuncSetAttribute(id_kern1,cudaFuncAttributeMaxDynamicSharedMemorySize, ID_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
+                                    "cudaFuncSetAttribute(id_kern2,cudaFuncAttributeMaxDynamicSharedMemorySize, ID_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
+                                    "cudaFuncSetAttribute(id_kern_timing1,cudaFuncAttributeMaxDynamicSharedMemorySize, ID_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
+                                    "cudaFuncSetAttribute(id_kern_timing2,cudaFuncAttributeMaxDynamicSharedMemorySize, ID_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
+                                    "gpuErrchk(cudaDeviceSynchronize());", \
+                                    "// allocate streams", \
+                                    "cudaStream_t *streams = (cudaStream_t *)malloc(" + str(MAX_STREAMS) + "*sizeof(cudaStream_t));", \
+                                    "int priority, minPriority, maxPriority;", \
+                                    "gpuErrchk(cudaDeviceGetStreamPriorityRange(&minPriority, &maxPriority));", \
+                                    "for(int i=0; i<" + str(MAX_STREAMS) + "; i++){", \
+                                    "    int adjusted_max = maxPriority - i; priority = adjusted_max > minPriority ? adjusted_max : minPriority;", \
+                                    "    gpuErrchk(cudaStreamCreateWithPriority(&(streams[i]),cudaStreamNonBlocking,priority));", \
+                                    "}", "return streams;"])
+        else:
+            self.gen_add_code_lines(["// set the max temp memory for the gradient kernels to account for large robots", \
+                                    "auto id_kern1 = static_cast<void (*)(T *, const T *, const int, const T *, const robotModel<T> *, const T, const int)>(&inverse_dynamics_gradient_kernel<T>);", \
+                                    "auto id_kern2 = static_cast<void (*)(T *, const T *, const int, const robotModel<T> *, const T, const int)>(&inverse_dynamics_gradient_kernel<T>);", \
+                                    "auto id_kern_timing1 = static_cast<void (*)(T *, const T *, const int, const T *, const robotModel<T> *, const T, const int)>(&inverse_dynamics_gradient_kernel_single_timing<T>);", \
+                                    "auto id_kern_timing2 = static_cast<void (*)(T *, const T *, const int, const robotModel<T> *, const T, const int)>(&inverse_dynamics_gradient_kernel_single_timing<T>);", \
+                                    "auto fd_kern1 = static_cast<void (*)(T *, const T *, const int, const T *, const T *, const robotModel<T> *, const T, const int)>(&forward_dynamics_gradient_kernel<T>);", \
+                                    "auto fd_kern2 = static_cast<void (*)(T *, const T *, const int, const robotModel<T> *, const T, const int)>(&forward_dynamics_gradient_kernel<T>);", \
+                                    "auto fd_kern_timing1 = static_cast<void (*)(T *, const T *, const int, const T *, const T *, const robotModel<T> *, const T, const int)>(&forward_dynamics_gradient_kernel_single_timing<T>);", \
+                                    "auto fd_kern_timing2 = static_cast<void (*)(T *, const T *, const int, const robotModel<T> *, const T, const int)>(&forward_dynamics_gradient_kernel_single_timing<T>);", \
+                                    "cudaFuncSetAttribute(id_kern1,cudaFuncAttributeMaxDynamicSharedMemorySize, ID_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
+                                    "cudaFuncSetAttribute(id_kern2,cudaFuncAttributeMaxDynamicSharedMemorySize, ID_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
+                                    "cudaFuncSetAttribute(id_kern_timing1,cudaFuncAttributeMaxDynamicSharedMemorySize, ID_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
+                                    "cudaFuncSetAttribute(id_kern_timing2,cudaFuncAttributeMaxDynamicSharedMemorySize, ID_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
+                                    "cudaFuncSetAttribute(fd_kern1,cudaFuncAttributeMaxDynamicSharedMemorySize, FD_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
+                                    "cudaFuncSetAttribute(fd_kern2,cudaFuncAttributeMaxDynamicSharedMemorySize, FD_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
+                                    "cudaFuncSetAttribute(fd_kern_timing1,cudaFuncAttributeMaxDynamicSharedMemorySize, FD_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
+                                    "cudaFuncSetAttribute(fd_kern_timing2,cudaFuncAttributeMaxDynamicSharedMemorySize, FD_DU_MAX_SHARED_MEM_COUNT*sizeof(T));", \
+                                    "gpuErrchk(cudaDeviceSynchronize());", \
+                                    "// allocate streams", \
+                                    "cudaStream_t *streams = (cudaStream_t *)malloc(" + str(MAX_STREAMS) + "*sizeof(cudaStream_t));", \
+                                    "int priority, minPriority, maxPriority;", \
+                                    "gpuErrchk(cudaDeviceGetStreamPriorityRange(&minPriority, &maxPriority));", \
+                                    "for(int i=0; i<" + str(MAX_STREAMS) + "; i++){", \
+                                    "    int adjusted_max = maxPriority - i; priority = adjusted_max > minPriority ? adjusted_max : minPriority;", \
+                                    "    gpuErrchk(cudaStreamCreateWithPriority(&(streams[i]),cudaStreamNonBlocking,priority));", \
+                                    "}", "return streams;"])
         self.gen_add_end_function()
         # free the streams and all allocated data
         self.gen_add_func_doc("Frees the memory used by grid", [], ["streams allocated by init_grid", "robotModel allocated by init_robotModel", "data allocated by init_gridData"], None)
@@ -326,24 +347,29 @@ class GRiDCodeGenerator:
         self.gen_add_constants_helpers(include_base_inertia, include_homogenous_transforms)
         # then the spatial algebra related helpers
         self.gen_spatial_algebra_helpers()
+        # then the linear algebra related helpers
+        self.gen_invert_matrix(use_thread_group)
         # then generate the robot specific transformation and inertia matricies
         self.gen_init_topology_helpers()
         self.gen_init_XImats(include_base_inertia,include_homogenous_transforms)
         self.gen_init_robotModel()
         self.gen_init_gridData()
         self.gen_load_update_XImats_helpers(use_thread_group)
-        if include_homogenous_transforms:
-            # once with and once without the gradients
-            self.gen_load_update_XmatsHom_helpers(use_thread_group,include_base_inertia,False)
-            self.gen_load_update_XmatsHom_helpers(use_thread_group,include_base_inertia,True)
-        # then generate kinematic algorithms
-        self.gen_eepos_and_gradient()
+        if not self.robot.floating_base: 
+            if include_homogenous_transforms:
+                # once with and once without the gradients
+                self.gen_load_update_XmatsHom_helpers(use_thread_group,include_base_inertia,False)
+                self.gen_load_update_XmatsHom_helpers(use_thread_group,include_base_inertia,True)
+            # then generate kinematic algorithms
+            self.gen_eepos_and_gradient()
         # then generate the dynamics algorithms
         self.gen_inverse_dynamics(use_thread_group)
         self.gen_direct_minv(use_thread_group)
-        self.gen_forward_dynamics(use_thread_group)
+        if not self.robot.floating_base: self.gen_forward_dynamics(use_thread_group)
         self.gen_inverse_dynamics_gradient(use_thread_group)
-        self.gen_forward_dynamics_gradient(use_thread_group)
+        if not self.robot.floating_base: 
+            self.gen_forward_dynamics_gradient(use_thread_group)
+        else: print('eepos, forward dynamics, and debug mode are still under development for floating base')
         # then finally the master init and close the namespace
         self.gen_init_close_grid()
         self.gen_add_end_control_flow()
