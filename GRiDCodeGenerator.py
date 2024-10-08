@@ -365,11 +365,10 @@ class GRiDCodeGenerator:
         # then generate the dynamics algorithms
         self.gen_inverse_dynamics(use_thread_group)
         self.gen_direct_minv(use_thread_group)
-        if not self.robot.floating_base: self.gen_forward_dynamics(use_thread_group)
+        self.gen_forward_dynamics(use_thread_group)
         self.gen_inverse_dynamics_gradient(use_thread_group)
-        if not self.robot.floating_base: 
-            self.gen_forward_dynamics_gradient(use_thread_group)
-        else: print('eepos, forward dynamics, and debug mode are still under development for floating base')
+        self.gen_forward_dynamics_gradient(use_thread_group)
+        if self.robot.floating_base: print('eepos, and debug mode are still under development for floating base')
         # then finally the master init and close the namespace
         self.gen_init_close_grid()
         self.gen_add_end_control_flow()
