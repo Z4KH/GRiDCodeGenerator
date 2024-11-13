@@ -1,7 +1,7 @@
 import sympy as sp
 
 def gen_get_XI_size(self, include_base_inertia = False, include_homogenous_transforms = False):
-    n = self.robot.get_num_pos()
+    n = self.robot.get_num_joints()
     return 36*2*n + (36 if include_base_inertia else 0) + (2*16*n if include_homogenous_transforms else 0)
 
 def gen_get_Xhom_size(self):
@@ -90,7 +90,7 @@ def gen_init_XImats(self, include_base_inertia = False, include_homogenous_trans
     self.gen_add_end_function()
 
 def gen_load_update_XImats_helpers_temp_mem_size(self):
-    n = self.robot.get_num_pos()
+    n = self.robot.get_num_joints()
     return 2*n
 
 def gen_load_update_XImats_helpers_function_call(self, use_thread_group = False, updated_var_names = None):
@@ -125,7 +125,7 @@ def gen_XImats_helpers_temp_shared_memory_code(self, temp_mem_size = None, inclu
         self.gen_add_code_line("__shared__ T s_temp[" + str(temp_mem_size) + "];")
 
 def gen_load_update_XImats_helpers(self, use_thread_group = False, include_base_inertia = False, include_homogenous_transforms = False):
-    n = self.robot.get_num_pos()
+    n = self.robot.get_num_joints()
     XI_size = self.gen_get_XI_size(include_base_inertia,include_homogenous_transforms)
     # add function description
     func_def_start = "void load_update_XImats_helpers("
@@ -198,11 +198,39 @@ def gen_load_update_XImats_helpers(self, use_thread_group = False, include_base_
                 if not val.is_constant():
                     # parse the symbolic value into the appropriate array access
                     str_val = str(val)
-                    # first check for sin/cos (revolute)
-                    str_val = str_val.replace("sin(theta)","s_temp[" + str(ind) + "]")
-                    str_val = str_val.replace("cos(theta)","s_temp[" + str(ind + n) + "]")
-                    # then just the variable (prismatic)
-                    str_val = str_val.replace("theta","s_q[" + str(ind) + "]")
+                   
+                    if self.robot.floating_base: # extra dof offset due to floating base
+                        num_dof = self.robot.get_num_pos()
+                        # revolute
+                        str_val = str_val.replace("sin(theta)","s_temp[" + str(ind + 6) + "]")
+                        str_val = str_val.replace("cos(theta)","s_temp[" + str(ind + num_dof + 6) + "]")
+                        # then just the variable (prismatic)
+                        str_val = str_val.replace("theta","s_q[" + str(ind + 6) + "]")
+
+                        # replace floating base linear & quaternion values (s_q[1..6]: [x,y,z,qx,qy,qz,qw])
+                        # replace square with self-multiply
+                        str_val = str_val.replace("x_fb**2", "s_q[0]*s_q[0]")
+                        str_val = str_val.replace("y_fb**2", "s_q[1]*s_q[1]")
+                        str_val = str_val.replace("z_fb**2", "s_q[2]*s_q[2]")
+                        str_val = str_val.replace("q1_fb**2", "s_q[3]*s_q[3]")
+                        str_val = str_val.replace("q2_fb**2", "s_q[4]*s_q[4]")
+                        str_val = str_val.replace("q3_fb**2", "s_q[5]*s_q[5]")
+                        str_val = str_val.replace("q4_fb**2", "s_q[6]*s_q[6]")
+                        # replace any remaining ones
+                        str_val = str_val.replace("x_fb", "s_q[0]")
+                        str_val = str_val.replace("y_fb", "s_q[1]")
+                        str_val = str_val.replace("z_fb", "s_q[2]")
+                        str_val = str_val.replace("q1_fb", "s_q[3]")
+                        str_val = str_val.replace("q2_fb", "s_q[4]")
+                        str_val = str_val.replace("q3_fb", "s_q[5]")
+                        str_val = str_val.replace("q4_fb", "s_q[6]")
+                    
+                    else:
+                        # first check for sin/cos (revolute)
+                        str_val = str_val.replace("sin(theta)","s_temp[" + str(ind) + "]")
+                        str_val = str_val.replace("cos(theta)","s_temp[" + str(ind + n) + "]")
+                        # then just the variable (prismatic)
+                        str_val = str_val.replace("theta","s_q[" + str(ind) + "]")
                     # then output the code
                     cpp_ind = str(self.gen_static_array_ind_3d(ind,col,row))
                     self.gen_add_code_line("s_XImats[" + cpp_ind + "] = static_cast<T>(" + str_val + ");")
@@ -248,7 +276,7 @@ def gen_load_update_XImats_helpers(self, use_thread_group = False, include_base_
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
     # then copy the TL to BR in parallel across all X
-    self.gen_add_parallel_loop("kcr",str(9*self.robot.get_num_pos()),use_thread_group)
+    self.gen_add_parallel_loop("kcr",str(9*self.robot.get_num_joints()),use_thread_group)
     self.gen_add_code_line("int k = kcr / 9; int cr = kcr % 9; int c = cr / 3; int r = cr % 3;")
     self.gen_add_code_line("int srcInd = k*36 + c*6 + r; int dstInd = srcInd + 21; // 3 more rows and cols")
     self.gen_add_code_line("s_XImats[dstInd] = s_XImats[srcInd];")
@@ -408,21 +436,26 @@ def gen_topology_helpers_size(self):
     return size
 
 def gen_topology_sparsity_helpers_python(self, INIT_MODE = False):
-    n = self.robot.get_num_pos()
-    num_ancestors = [len(self.robot.get_ancestors_by_id(jid)) for jid in range(n)]
-    num_subtree = [len(self.robot.get_subtree_by_id(jid)) for jid in range(n)]
-    running_sum_num_ancestors = [sum(num_ancestors[0:jid]) for jid in range(n+1)] # for the loops that check < jid+1
-    running_sum_num_subtree = [sum(num_subtree[0:jid]) for jid in range(n)]
+    NJ = self.robot.get_num_joints()
+    n = self.robot.get_num_vel()
+    num_ancestors = [len(self.robot.get_ancestors_by_id(jid)) for jid in range(NJ)]
+    num_subtree = [len(self.robot.get_subtree_by_id(jid)) for jid in range(NJ)]
+    running_sum_num_ancestors = [sum(num_ancestors[0:jid]) for jid in range(NJ+1)] # for the loops that check < jid+1
+    running_sum_num_subtree = [sum(num_subtree[0:jid]) for jid in range(NJ)]
 
-    dva_cols_per_partial = self.robot.get_total_ancestor_count() + n
-    df_cols_per_partial = self.robot.get_total_ancestor_count() + self.robot.get_total_subtree_count()
+    if self.robot.floating_base:
+        dva_cols_per_partial = n*NJ
+        df_cols_per_partial = n*NJ
+    else:
+        dva_cols_per_partial = self.robot.get_total_ancestor_count() + NJ
+        df_cols_per_partial = self.robot.get_total_ancestor_count() + self.robot.get_total_subtree_count()
 
-    dva_cols_per_jid = [num_ancestors[jid] + 1 for jid in range(n)]
-    df_cols_per_jid = [num_ancestors[jid] + num_subtree[jid] for jid in range(n)]
+    dva_cols_per_jid = [num_ancestors[jid] + 1 for jid in range(NJ)]
+    df_cols_per_jid = [num_ancestors[jid] + num_subtree[jid] for jid in range(NJ)]
     df_col_that_is_jid = num_ancestors
     
-    running_sum_dva_cols_per_jid = [running_sum_num_ancestors[jid] + jid for jid in range(n+1)] # for the loops that check < jid+1
-    running_sum_df_cols_per_jid = [running_sum_num_ancestors[jid] + running_sum_num_subtree[jid] for jid in range(n)]
+    running_sum_dva_cols_per_jid = [running_sum_num_ancestors[jid] + jid for jid in range(NJ+1)] # for the loops that check < jid+1
+    running_sum_df_cols_per_jid = [running_sum_num_ancestors[jid] + running_sum_num_subtree[jid] for jid in range(NJ)]
 
     if INIT_MODE:
         return [str(val) for val in num_ancestors], [str(val) for val in num_subtree], \
@@ -432,7 +465,12 @@ def gen_topology_sparsity_helpers_python(self, INIT_MODE = False):
                 df_cols_per_partial,  df_cols_per_jid,  running_sum_df_cols_per_jid,  df_col_that_is_jid
 
 def gen_init_topology_helpers(self):
-    n = self.robot.get_num_pos()
+    """
+    S_ind is either the actual index of the 1 in the S matrix, or points to the index in cpp memory.
+    It accounts for the floating base offset, so any operations with the floating base S indices will
+    require an offset elsewhere in the code
+    """
+    n = self.robot.get_num_joints()
     if self.robot.is_serial_chain() and self.robot.are_Ss_identical(list(range(n))):
         self.gen_add_code_lines(["//", \
                                  "// Topology Helpers not needed!", \
@@ -461,10 +499,10 @@ def gen_init_topology_helpers(self):
                      "                            " + ",".join(running_sum_num_ancestors) + ", // running_sum_num_ancestors",
                      "                            " + ",".join(running_sum_num_subtree) + "}; // running_sum_num_subtree"])
         if not self.robot.are_Ss_identical(list(range(n))):
-            S_inds = [str(self.robot.get_S_by_id(jid).tolist().index(1)) for jid in range(n)]
+            S_inds = self.robot.get_S_inds(n)
             code.insert(-4,"                            " + ",".join(S_inds) + ", // S_inds")
     elif not self.robot.are_Ss_identical(list(range(n))):
-            S_inds = [str(self.robot.get_S_by_id(jid).tolist().index(1)) for jid in range(n)]
+            S_inds = self.robot.get_S_inds(n)
             code.append("int h_topology_helpers[] = {" + ",".join(S_inds) + "}; // S_inds")
     self.gen_add_code_lines(code)
     
@@ -474,12 +512,17 @@ def gen_init_topology_helpers(self):
     self.gen_add_code_line("return d_topology_helpers;")
     self.gen_add_end_function()
 
-def gen_topology_helpers_pointers_for_cpp(self, inds = None, updated_var_names = None, NO_GRAD_FLAG = False):
+def gen_topology_helpers_pointers_for_cpp(self, inds = None, updated_var_names = None, NO_GRAD_FLAG = False, OFFSET = True):
+    """
+    This function needs to be rewritten for floating base --- Repurcussions extend to all algorithms that support
+    floating base, so those algorithms must be modified to support edits. 'OFFSET' input added for now
+    """
     var_names = dict(jid_name = "jid", s_topology_helpers_name = "s_topology_helpers")
     if updated_var_names is not None:
         for key,value in updated_var_names.items():
             var_names[key] = value
-    n = self.robot.get_num_pos()
+    n = self.robot.get_num_vel()
+    NJ = self.robot.get_num_joints()
     if inds == None:
         inds = list(range(n))
     IDENTICAL_S_FLAG_INDS = self.robot.are_Ss_identical(inds)
@@ -495,6 +538,10 @@ def gen_topology_helpers_pointers_for_cpp(self, inds = None, updated_var_names =
         df_col_offset_for_parent = str(running_sum_df_cols_per_jid[self.robot.get_parent_id(inds[0])])
         dva_col_offset_for_jid_p1 = str(running_sum_dva_cols_per_jid[inds[0] + 1])
         df_col_that_is_jid = str(df_col_that_is_jid[inds[0]])
+
+        if self.robot.floating_base:
+            if 0 in inds: S_ind = '-1'
+            else: S_ind = str(self.robot.get_S_by_id(inds[0]).tolist().index(1))
     
     # else branch based on type of robot
     else:
@@ -515,15 +562,23 @@ def gen_topology_helpers_pointers_for_cpp(self, inds = None, updated_var_names =
         else:
             parent_ind = var_names["s_topology_helpers_name"] + "[" + var_names["jid_name"] + "]"
             if not IDENTICAL_S_FLAG_INDS: # this set of inds can be optimized if all S are the same
-                S_ind = var_names["s_topology_helpers_name"] + "[" + str(n) + " + " + var_names["jid_name"] +  "]"
+                if OFFSET:
+                    S_ind = var_names["s_topology_helpers_name"] + "[" + str(n) + " + " + var_names["jid_name"] +  "]"
+                else: S_ind = var_names["s_topology_helpers_name"] + "[" + str(NJ) + " + " + var_names["jid_name"] +  "]"
             if not IDENTICAL_S_FLAG_GLOBAL: # ofset is based on any S different at all
-                ancestor_offset = 2*n
+                if OFFSET: ancestor_offset = 2*n
+                else: ancestor_offset = NJ+n
             else:
-                ancestor_offset = n
-                
-            subtree_offset = ancestor_offset + n
-            running_sum_ancestor_offset = subtree_offset + n
-            running_sum_subtree_offset = running_sum_ancestor_offset + n + 1
+                ancestor_offset = NJ
+            
+            if OFFSET:
+                subtree_offset = ancestor_offset + n
+                running_sum_ancestor_offset = subtree_offset + n
+                running_sum_subtree_offset = running_sum_ancestor_offset + n + 1
+            else:
+                subtree_offset = ancestor_offset + NJ
+                running_sum_ancestor_offset = subtree_offset + NJ
+                running_sum_subtree_offset = running_sum_ancestor_offset + NJ + 1
 
             dva_col_offset_for_jid = "(" + var_names["s_topology_helpers_name"] + "[" + str(running_sum_ancestor_offset) + " + " + var_names["jid_name"] + "]" + \
                                      " + " + var_names["jid_name"] + ")"
