@@ -29,7 +29,7 @@ def gen_crba_inner_function_call(self, use_thread_group = False, updated_var_nam
 
 def gen_crba_inner(self, use_thread_group = False):
     
-    n = self.robot.get_num_pos()
+    n = self.robot.get_num_joints()
     n_bfs_levels = self.robot.get_max_bfs_level() + 1
 
     #construct the boilerplate and function definition
@@ -56,74 +56,31 @@ def gen_crba_inner(self, use_thread_group = False):
     self.gen_add_code_line(func_def, True)
 
     
+    # first clear the matrix
+    self.gen_add_parallel_loop("i",str(n*n),use_thread_group)
+    self.gen_add_code_line('s_M[i] = static_cast<T>(0);')
+    self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
     #deal with like memory for variables --> memory is taken care of in device and host 
     alpha_offset = 0
     beta_offset = alpha_offset + 36*n
-    #t_offset = beta_offset + 36*n
-    fh_offset = beta_offset + 36*n
-    #j_offset = fh_offset + 36*n #bc fh is matrix 
+    fh_offset = beta_offset + 36*n 
     parent_offset = fh_offset + 6*n #bc j is 1 int 
     jid_offset = parent_offset + n
     self.gen_add_code_line("T *alpha = &s_temp[" + str(alpha_offset) + "];")
     self.gen_add_code_line("T *beta = &s_temp[" + str(beta_offset) + "];")
-    #self.gen_add_code_line("T *transpose = &s_temp[" + str(t_offset) + "];")
     self.gen_add_code_line("T *s_fh = &s_temp[" + str(fh_offset) + "];")
-    #self.gen_add_code_line("T *s_j = &s_temp[" + str(j_offset) + "];")
-    self.gen_add_code_line("T *s_parent_inds = &s_temp[" + str(parent_offset) + "];")
+    # self.gen_add_code_line("T *s_parent_inds = &s_temp[" + str(parent_offset) + "];")
     self.gen_add_code_line("T *s_jid_list = &s_temp[" + str(jid_offset) + "];")
-    #self.gen_add_code_line("T *temparr = &s_t_emp[" + str(temparr_offset) + "];")
-    #self.gen_add_code_line("T *s_X = &s_temp[" + str(x_offset) + "];")
-    #self.gen_add_code_line("T *s_IC = &s_temp[" + str(ic_offset) + "];")
-    #self.gen_add_code_line("T *ind = &s_temp[" + str(ind_offset) + "];")
-    #self.gen_add_code_line("T *parent_ind_cpp = &s_temp[" + str(parent_offset) + "];")
-    #self.gen_add_code_line("T *S_ind_cpp = &s_temp[" + str(sval_offset) + "];")
 
-    #x_offset = 0
-    #ic_offset = x_offset + 6*6*6*4
-
-    #self.gen_add_code_line("T *s_X = &s_XImats[" + str(x_offset) + "];")
-    #self.gen_add_code_line("T *s_IC = &s_XImats[" + str(ic_offset) + "];")
-
-    """for i in range(7):
-        self.gen_add_code_line("s_X[" + str(i) + "] = s_XImats[" + str(36*i) + "];")
-    
-    for i in range(7):
-        self.gen_add_code_line("s_IC[" + str(i) + "] = s_XImats[" + str(36*(i+7)) + "];")"""
-
-    
     self.gen_add_code_line("//")
     self.gen_add_code_line("// first loop (split into 2 parallel loops in bfs loop)")
     self.gen_add_code_line("// each bfs level runs in parallel")
     self.gen_add_code_line("//")
-
-    """self.gen_add_parallel_loop("ind",str(n),use_thread_group)
-    self.gen_add_code_line("for(int i=0; i<" + str(n) + "; i++) {")
-    self.gen_add_code_line("    for(int j=0; j<" + str(n) + "; j++) {")
-    self.gen_add_code_line("        transpose[36*ind + i][36*ind + j] = &s_XImats[36*ind + j][36*ind + i];")
-    self.gen_add_code_line("    }")
-    self.gen_add_code_line("}")"""
-
-    #self.gen_add_code_line("transpose[ind] = dot_prod<T,6,6,1>(&s_XImats[36*(ind+7)],&s_XImats[36*ind]);")
-    """self.gen_add_code_line("alpha[ind] = dot_prod<T,6,6,1>(&s_XImats[36*(ind+7)],&transpose[36*ind]);")
-    self.gen_add_end_control_flow()
-    self.gen_add_sync(use_thread_group) 
-
-    self.gen_add_parallel_loop("ind",str(n),use_thread_group)
-    self.gen_add_code_line("int row = ind % 6;")
-    self.gen_add_code_line("beta[ind] = dot_prod<T,6,6,1>(&s_XImats[36*ind + row],&alpha[ind]);")
-    self.gen_add_end_control_flow()
-    self.gen_add_sync(use_thread_group) 
-
-
-    self.gen_add_code_line("//")
-    self.gen_add_code_line("// each bfs level runs in parallel")
-    self.gen_add_code_line("//")"""
  
     for bfs_level in range(n_bfs_levels-1,0,-1):
         inds = self.robot.get_ids_by_bfs_level(bfs_level)
-        #ind = str(inds)
-        #ind = ind[1]
-        #self.gen_add_code_line("ind = " + ind)
+ 
         joint_names = [self.robot.get_joint_by_id(indj).get_name() for indj in inds]
         link_names = [self.robot.get_link_by_id(indl).get_name() for indl in inds]
 
@@ -132,13 +89,8 @@ def gen_crba_inner(self, use_thread_group = False):
         self.gen_add_code_line("//     links are: " + ", ".join(link_names))
 
         parent_ind_cpp, S_ind_cpp = self.gen_topology_helpers_pointers_for_cpp(inds, NO_GRAD_FLAG = True)
-        #self.gen_add_code_line("// S_ind_cpp = " + S_ind_cpp)
-        
-        #self.gen_add_parallel_loop("ind",str(36*len(inds)),use_thread_group)
+
         self.gen_add_parallel_loop("ind",str(36),use_thread_group)
-        #row = ind % 6   
-        #self.gen_add_code_line("rowwww = " + str(row))
-        #self.gen_add_code_line("int row = ind % 6;")
         if len(inds) > 1:
             select_var_vals = [("int", "jid", [str(jid) for jid in inds])]
             self.gen_add_multi_threaded_select("ind", "< ", [str(6*(i+1)) for i in range(len(inds))], select_var_vals)
@@ -151,8 +103,7 @@ def gen_crba_inner(self, use_thread_group = False):
             for i in range(len(inds)):
                 self.gen_add_parallel_loop("ind",str(36),use_thread_group)
                 self.gen_add_code_line("int jid = s_jid_list[" + str(len(inds)+ i*6) + "];")
-                self.gen_add_code_line("int row = ind % 6; int col = (ind / 6) % 6; int jid6 = jid * 6;")
-                #self.gen_add_code_line("alpha[ind] = dot_prod<T,6,6,1>(&s_XImats[36*(ind+7)],&s_XImats[36*ind + row]);")
+                self.gen_add_code_line("int row = ind % 6; int col = (ind / 6); int jid6 = jid * 6;")
                 self.gen_add_code_line("alpha[6*jid6 + row + (6*col)] = dot_prod<T,6,1,1>(&s_XImats[6*jid6 + row*6],&s_XImats[36*(jid+" + str(n-7) + "+7) + (col*6)]);")
                 self.gen_add_end_control_flow()
                 self.gen_add_sync(use_thread_group) 
@@ -162,7 +113,6 @@ def gen_crba_inner(self, use_thread_group = False):
                 self.gen_add_code_line("int jid = s_jid_list[" + str(len(inds)+ i*6) + "];")
                 self.gen_add_code_line("int parent_ind = " + str(parent_ind_cpp) + ";")
                 self.gen_add_code_line("int row = ind % 6; int col = (ind / 6) % 6; int jid6 = jid * 6;")
-                #self.gen_add_code_line("alpha[ind] = dot_prod<T,6,6,1>(&s_XImats[36*(ind+7)],&s_XImats[36*ind + row]);")
                 self.gen_add_code_line("beta[6*jid6 + col + (6*row)] = dot_prod<T,6,6,1>(&alpha[6*jid6 + row],&s_XImats[6*jid6 + (col*6)]);")
                 self.gen_add_code_line("s_XImats[36*(parent_ind +" + str(n-7) + "+7) + col + (6*row)] += beta[6*jid6 + col + (6*row)];")           
                 self.gen_add_end_control_flow()
@@ -192,339 +142,74 @@ def gen_crba_inner(self, use_thread_group = False):
             self.gen_add_end_control_flow()
             self.gen_add_sync(use_thread_group)
 
-        """if len(inds) > 1:
-            select_var_vals = [("int", "jid", [str(jid) for jid in inds])]
-            self.gen_add_multi_threaded_select("ind", "< ", [str(6*(i+1)) for i in range(len(inds))], select_var_vals)
-            jid = "jid" """
-        
-        
-        
-
-        """self.gen_add_code_line("for(int ind = 0; ind <" + str(n_bfs_levels-1) + "; ind++) {")
-        self.gen_add_code_line("    int parent_ind = " + str(parent_ind_cpp) + ";")
-        self.gen_add_code_line("    s_XImats[36* (" + str(parent_ind_cpp) + " + 7)] = s_XImats[36*(" + str(parent_ind_cpp) + " + 7)] + dot_prod<T,6,6,6>(&alpha[36*ind],&s_XImats[36*ind]);")
-        self.gen_add_code_line("}")"""
-
-                 
-        #self.gen_add_code_line("int ind = " + ind + ";")
-        #self.gen_add_code_line("int row = ind % 6;")
-
-        #parent_ind = self.robot.get_parent_id(ind)
-        #comment = "// parent_ind = self.robot.get_parent_id(ind)"
-        #self.gen_add_code_line(comment)
-        #self.gen_add_code_line("int parent_ind = " + parent_ind_cpp + ";")
-        
-        #Xmat = self.robot.get_Xmat_Func_by_id(ind)(q[ind])
-        #comment = "// Xmat = self.robot.get_Xmat_Func_by_id(ind)(q[ind]) --> as param so don't need to init it now" 
-        #self.gen_add_code_line(comment)
-    
-        #IC[parent_ind] = IC[parent_ind] + np.matmul(Xmat.T@IC[ind],Xmat)
-        #comment = "// IC[parent_ind] = IC[parent_ind] + (Xmat.T)@IC[ind]@Xmat" 
-        #self.gen_add_code_line(comment)
-        #self.gen_add_code_line("temparr[jid] = dot_prod<T,6,6,1>(&s_IC[jid],&s_X[jid]);")
-        #self.gen_add_code_line("temparr[ind] = dot_prod<T,6,6,1>(&s_XImats[36*(ind+7)],&s_XImats[36*ind]);")
-        #self.gen_add_code_line("s_XImats[36*(" + parent_ind_cpp + "+7)] = s_XImats[36*(" + parent_ind_cpp + "+7)] + dot_prod<T,6,6,1>(&s_XImats[36*ind + row], &temparr[ind]);") 
-        #self.gen_add_code_line("&s_IC[" + parent_ind_cpp + "] = &s_IC[" + parent_ind_cpp + "] + dot_prod<T,6,6,1>(s_X[6*jid6 + row], dot_prod<T,6,6,1>(&s_IC[jid],s_X));") 
-        #self.gen_add_end_control_flow()
-
-    #self.gen_add_sync(use_thread_group) 
-    
-    self.gen_add_code_line("//")
-    self.gen_add_code_line("// Calculation of fh  ")
-    self.gen_add_code_line("//")
-
-    for ind in range(n-1, -1, -1): # in parallel
-        # Calculation of fh
-        _, S_ind_cpp = self.gen_topology_helpers_pointers_for_cpp(NO_GRAD_FLAG = True)
-        
-        #self.gen_add_parallel_loop("ind",str(n),use_thread_group)
-        self.gen_add_parallel_loop("ind",str(6),use_thread_group)
-
-        self.gen_add_code_line("int jid = " + str(ind) + " ; int jid6 = jid * 6;")
-        self.gen_add_code_line("int row = ind % 6; ")
-
-        #fh_code = "if (row == " + S_ind_cpp + "){s_fh[ind] = s_XImats[36*(jid+7) + row + col*6];}"
-        fh_code = "s_fh[jid6 + row] = s_XImats[36*(jid+7 + " + str(n-7) + ") + " +  S_ind_cpp + "*6 + ind];"
-        self.gen_add_code_line(fh_code)
-
-        self.gen_add_end_control_flow()
-    self.gen_add_sync(use_thread_group)
-    
+    # Calculation of M[ind,ind]
     self.gen_add_code_line("//")
     self.gen_add_code_line("// Calculation of M[ind, ind] ")
     self.gen_add_code_line("//")
+    _, S_ind_cpp = self.gen_topology_helpers_pointers_for_cpp(NO_GRAD_FLAG = True)
     
     self.gen_add_parallel_loop("jid",str(n),use_thread_group)
-    self.gen_add_code_line("int jidn = jid * " + str(n) + "; int jid6 = jid * 6;")
 
-    h_code = "s_M[jid + jidn] = s_fh[jid6 + " + S_ind_cpp + "];"
-    self.gen_add_code_line(h_code)
-
-    #parent_code = "s_parent[jid] =  "+ parent_ind_cpp + "];"
-    #self.gen_add_code_line(parent_code)
+    ImatOffset = 36*n   # Offset in XImats to Imats
+    self.gen_add_code_line(f"s_M[jid+jid*{n}] = s_XImats[{ImatOffset} + 36*jid + 6*{S_ind_cpp} + {S_ind_cpp}];") # take the S_ind row and S_ind column of appropriate Imat
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
+    
 
     self.gen_add_code_line("//")
-    self.gen_add_code_line("// Calculation of parent_ind, fh, M[ind, parent] and M[parent, ind] ")
+    self.gen_add_code_line("// Calculation of M[ind, parent]")
     self.gen_add_code_line("//")
 
-    for bfs_level in range(n_bfs_levels-1,0,-1):
-        inds = self.robot.get_ids_by_bfs_level(bfs_level)
-        parent_ind_cpp, S_ind_cpp = self.gen_topology_helpers_pointers_for_cpp(inds, NO_GRAD_FLAG = True)
+    # initialize fh as (XS)^T
+    self.gen_add_parallel_loop('i',str(n*6),use_thread_group)
+    self.gen_add_code_line('int jid = i / 6; int ind = i % 6;')
+    self.gen_add_code_line(f's_fh[i] = s_XImats[{ImatOffset} + 36*jid + 6*{S_ind_cpp} + ind];')
+    self.gen_add_end_control_flow()
 
-        
-        joint_names = [self.robot.get_joint_by_id(indj).get_name() for indj in inds]
-        link_names = [self.robot.get_link_by_id(indl).get_name() for indl in inds]
+    # M[jid, parent_id] = dot product between (S_lambda^T * X_lambda^t) * IS
+    # IS = I[6*S_ind]
+    # (S_lambda^T * X_lambda^t) = X_lambda[S_ind row]
 
-        self.gen_add_code_line("// pass updates where bfs_level is " + str(bfs_level))
-        self.gen_add_code_line("//     joints are: " + ", ".join(joint_names))
-        self.gen_add_code_line("//     links are: " + ", ".join(link_names))
-
-        """if len(inds) > 1:
-            select_var_vals = [("int", "jid", [str(jid) for jid in inds])]
-            self.gen_add_multi_threaded_select("ind", "< ", [str(6*(i+1)) for i in range(len(inds))], select_var_vals)
-            jid = "jid"
-        else:
-            jid = str(inds[0])"""
-
-        if len(inds) > 1:
-           #     select_var_vals = [("int", "jid", [str(jid) for jid in inds])]
-           #     self.gen_add_multi_threaded_select("parallel_ind", "< ", [str(6*(i+1)) for i in range(len(inds))], select_var_vals)
-           #     jid = "jid"
-           # else:
-            self.gen_add_parallel_loop("parallel_ind",str(len(inds)*6),use_thread_group)
-            select_var_vals = [("int", "jid", [str(jid) for jid in inds])]
-            self.gen_add_multi_threaded_select("parallel_ind", "< ", [str(6*(i+1)) for i in range(len(inds))], select_var_vals)
-            self.gen_add_code_line("s_parent_inds[jid] = " + str(parent_ind_cpp) + ";")
-            #self.gen_add_code_line("s_inds[jid] = " + str(jid) + ";")
-            self.gen_add_end_control_flow()
-            self.gen_add_sync(use_thread_group)
-          
-           # self.gen_add_parallel_loop("parallel_ind",str(len(inds)*6),use_thread_group)
+    # loop over all joints and parent chains in parallel
+    max_ancestors = self.robot.get_max_num_ancestors()
+    self.gen_add_parallel_loop("jid",str(n),use_thread_group)
+    parent_chain = '{' + "-1, " * (max_ancestors-1) + "-1}"
+    self.gen_add_code_line(f"int jid_parents[] = {parent_chain};")
+    self.gen_add_code_line('int num_parents = 0;')
 
 
-        if len(inds) > 1:
-        #     select_var_vals = [("int", "jid", [str(jid) for jid in inds])]
-        #     self.gen_add_multi_threaded_select("parallel_ind", "< ", [str(6*(i+1)) for i in range(len(inds))], select_var_vals)
-        #     jid = "jid"
-        # else:
-            self.gen_add_parallel_loop("parallel_ind",str(len(inds)*6),use_thread_group)
-            select_var_vals = [("int", "jid", [str(jid) for jid in inds])]
-            self.gen_add_multi_threaded_select("parallel_ind", "< ", [str(6*(i+1)) for i in range(len(inds))], select_var_vals)         
-            self.gen_add_code_line("int jid6 = jid * 6; int row = parallel_ind % 6;")
-            self.gen_add_code_line("int curr_parent = s_parent_inds[jid];")
-            self.gen_add_code_line("s_fh[jid6 + row] = dot_prod<T,6,1,1>(&s_XImats[36*(curr_parent+1) + 6*row], &s_fh[jid6]);")
-            self.gen_add_end_control_flow()
-            self.gen_add_sync(use_thread_group)
+    self.gen_add_code_line('switch (jid) {', True)
+    for jid in range(n):
+        self.gen_add_code_line(f"case {jid}:", True)
+        parent_chain = self.robot.get_ancestors_by_id(jid)
+        length = len(parent_chain)
 
+        for i, parent_ind in enumerate(parent_chain): 
+            self.gen_add_code_line(f"jid_parents[{i}] = {parent_ind};")
+        self.gen_add_code_line(f"num_parents += {length};")
+        self.gen_add_code_line("break;")
+        self.indent_level -= 1
+    self.gen_add_end_control_flow()
 
+    self.gen_add_code_line("T s_alpha[6];")
+    self.gen_add_code_line('for (int i = 0; i < num_parents; i++) {', True)
+    
+    self.gen_add_code_line('int X_ind = i==0 ? jid : jid_parents[i-1];')
+    self.gen_add_code_line('for (int k = 0; k < 6; k++) s_alpha[k] = s_fh[jid*6+k];')
+    self.gen_add_code_line('for (int k = 0; k < 6; k++) s_fh[jid*6 + k] = dot_prod<T,6,1,1>(&s_XImats[36*X_ind+k*6], &s_alpha[0]);')
 
-        for parent_level in range(bfs_level, 0, -1):
-            par_inds = self.robot.get_ids_by_bfs_level(parent_level)
-        
-            parent_ind_cpp_par, S_ind_cpp_par = self.gen_topology_helpers_pointers_for_cpp(par_inds, NO_GRAD_FLAG = True)
-            
-            self.gen_add_code_line("// pass updates where parent_level is " + str(parent_ind_cpp_par))
-            self.gen_add_code_line("//     joints are: " + ", ".join(joint_names))
-            self.gen_add_code_line("//     links are: " + ", ".join(link_names))
+    self.gen_add_code_line('int parent_ind = jid_parents[i];')
+    self.gen_add_code_line(f"s_M[jid*{n} + parent_ind] = s_fh[jid*6 + {S_ind_cpp}];")
+    self.gen_add_code_line(f"s_M[parent_ind*{n} + jid] = s_M[jid*{n} + parent_ind];") # M symmetric
 
-            if len(inds) <= 1:
-                self.gen_add_parallel_loop("parallel_ind",str(len(inds)*6),use_thread_group)
-            #     select_var_vals = [("int", "jid", [str(jid) for jid in inds])]
-            #     self.gen_add_multi_threaded_select("parallel_ind", "< ", [str(6*(i+1)) for i in range(len(inds))], select_var_vals)
-            #     jid = "jid"
-            # else:
-                jid = str(inds[0])
-                self.gen_add_code_line("int jid = " + str(jid) + ";")
-                self.gen_add_code_line("s_parent_inds[jid] = " + str(parent_ind_cpp_par) + ";")
-                #self.gen_add_code_line("s_inds[jid] = " + str(jid) + ";")
-                self.gen_add_end_control_flow()
-                self.gen_add_sync(use_thread_group)
-            
-            # self.gen_add_parallel_loop("parallel_ind",str(len(inds)*6),use_thread_group)
+    self.gen_add_end_control_flow()
+    self.gen_add_end_control_flow()
 
-            if len(inds) <= 1:
-                self.gen_add_parallel_loop("parallel_ind",str(len(inds)*6),use_thread_group)
-                # select_var_vals = [("int", "jid", [str(jid) for jid in inds])]
-                # self.gen_add_multi_threaded_select("parallel_ind", "< ", [str(6*(i+1)) for i in range(len(inds))], select_var_vals)
-                # jid = "jid"
-            # else:
-                jid = str(inds[0])
-                self.gen_add_code_line("int jid = " + str(jid) + ";")
-            
-                self.gen_add_code_line("int jid6 = jid * 6; int row = parallel_ind % 6;")
-                self.gen_add_code_line("int curr_parent = s_parent_inds[jid];")
-                self.gen_add_code_line("s_fh[jid6 + row] = dot_prod<T,6,1,1>(&s_XImats[36*(curr_parent+1) + 6*row], &s_fh[jid6]);")
-                self.gen_add_end_control_flow()
-                self.gen_add_sync(use_thread_group)
-
-            self.gen_add_parallel_loop("parallel_ind",str(len(inds)*6),use_thread_group)
-            if len(inds) > 1:
-                select_var_vals = [("int", "jid", [str(jid) for jid in inds])]
-                self.gen_add_multi_threaded_select("parallel_ind", "< ", [str(6*(i+1)) for i in range(len(inds))], select_var_vals)
-                jid = "jid"
-                self.gen_add_code_line("int jidn = jid * " + str(n) + "; int jid6 = jid * 6;" )
-                self.gen_add_code_line("if((jid-1) != -1){")
-                self.gen_add_code_line("    s_M[jid-1 + jidn] = s_fh[jid6 + " + S_ind_cpp_par + "];") 
-                self.gen_add_code_line("    s_M[jid + (jid-1)*" + str(n) + "] = s_M[jid-1 + jidn];")
-            else:
-                jid = str(inds[0])
-                self.gen_add_code_line("int jid = " + str(jid) + ";")        
-                self.gen_add_code_line("int jidn = jid * " + str(n) + "; int jid6 = jid * 6;" )
-                self.gen_add_code_line("int curr_parent = s_parent_inds[jid];")
-                self.gen_add_code_line("if(s_parent_inds[jid] != -1){")
-                self.gen_add_code_line("    s_M[jid + curr_parent*" + str(n) + "] = s_fh[jid6 + " + S_ind_cpp_par + "];")
-                self.gen_add_code_line("    s_M[curr_parent + jidn] = s_M[jid + curr_parent*" + str(n) + "];")
-
-            self.gen_add_code_line("}")
-            self.gen_add_end_control_flow()
-            self.gen_add_sync(use_thread_group)       
-  
+    self.gen_add_sync(use_thread_group)
     self.gen_add_end_function()
 
-    # for bfs_level in range(n_bfs_levels-1,0,-1):
-    #     inds = self.robot.get_ids_by_bfs_level(bfs_level)
-    #     parent_ind_cpp, S_ind_cpp = self.gen_topology_helpers_pointers_for_cpp(inds, NO_GRAD_FLAG = True)
-
-    #     #self.gen_add_code_line("s_inds = ", inds)
-    #     #self.gen_add_code_line("s_parent_inds = ", inds)
-        
-    #     joint_names = [self.robot.get_joint_by_id(indj).get_name() for indj in inds]
-    #     link_names = [self.robot.get_link_by_id(indl).get_name() for indl in inds]
-
-    #     self.gen_add_code_line("// pass updates where bfs_level is " + str(bfs_level))
-    #     self.gen_add_code_line("//     joints are: " + ", ".join(joint_names))
-    #     self.gen_add_code_line("//     links are: " + ", ".join(link_names))
-
-    #     """if len(inds) > 1:
-    #         select_var_vals = [("int", "jid", [str(jid) for jid in inds])]
-    #         self.gen_add_multi_threaded_select("ind", "< ", [str(6*(i+1)) for i in range(len(inds))], select_var_vals)
-    #         jid = "jid"
-    #     else:
-    #         jid = str(inds[0])"""
-
-    #     self.gen_add_parallel_loop("parallel_ind",str(len(inds)*6),use_thread_group)
-
-    #     if len(inds) > 1:
-    #         select_var_vals = [("int", "jid", [str(jid) for jid in inds])]
-    #         self.gen_add_multi_threaded_select("parallel_ind", "< ", [str(6*(i+1)) for i in range(len(inds))], select_var_vals)
-    #         jid = "jid"
-    #     else:
-    #         jid = str(inds[0])
-    #         self.gen_add_code_line("int jid = " + str(jid) + ";")
-
-    #     self.gen_add_code_line("s_parent_inds[jid] = " + str(parent_ind_cpp) + ";")
-    #     #self.gen_add_code_line("s_inds[jid] = " + str(jid) + ";")
-    #     self.gen_add_end_control_flow()
-    #     self.gen_add_sync(use_thread_group)
-        
-    #     self.gen_add_parallel_loop("parallel_ind",str(len(inds)*6),use_thread_group)
-
-    #     if len(inds) > 1:
-    #         select_var_vals = [("int", "jid", [str(jid) for jid in inds])]
-    #         self.gen_add_multi_threaded_select("parallel_ind", "< ", [str(6*(i+1)) for i in range(len(inds))], select_var_vals)
-    #         jid = "jid"
-    #     else:
-    #         jid = str(inds[0])
-    #         self.gen_add_code_line("int jid = " + str(jid) + ";")
-        
-    #     self.gen_add_code_line("int jid6 = jid * 6; int row = parallel_ind % 6;")
-    #     #self.gen_add_code_line("int row = parallel_ind % 6; int col = (parallel_ind / 7) % 7;")
-    #     #self.gen_add_code_line("int curr_joint = s_inds[jid];")
-    #     self.gen_add_code_line("int curr_parent = s_parent_inds[jid];")
-        
-    #     #self.gen_add_code_line("if(s_parent_inds[jid + row*7] != -1){s_fh[curr_joint] = dot_prod<T,6,1,1>(&s_XImats[6*jid6 + curr_joint*6], &s_fh[jid + row*7]);}")
-    #     #self.gen_add_code_line("if(s_parent_inds[parallel_ind] != -1){s_fh[row*7 + curr_joint] = dot_prod<T,6,1,7>(&s_XImats[6*jid6 + 6*row], &s_fh[row*7 + curr_joint]);}")
-    #     self.gen_add_code_line("s_fh[jid6 + row] = dot_prod<T,6,1,1>(&s_XImats[36*(curr_parent+1) + 6*row], &s_fh[jid6]);")
-
-    #     self.gen_add_end_control_flow()
-    #     self.gen_add_sync(use_thread_group)
 
 
-
-    #     for parent_level in range(bfs_level, 0, -1):
-    #         par_inds = self.robot.get_ids_by_bfs_level(parent_level)
-        
-    #         parent_ind_cpp_par, S_ind_cpp_par = self.gen_topology_helpers_pointers_for_cpp(par_inds, NO_GRAD_FLAG = True)
-            
-    #         self.gen_add_code_line("// pass updates where parent_level is " + str(parent_ind_cpp_par))
-    #         self.gen_add_code_line("//     joints are: " + ", ".join(joint_names))
-    #         self.gen_add_code_line("//     links are: " + ", ".join(link_names))
-
-
-           
-    #         # self.gen_add_parallel_loop("parallel_ind",str(len(inds)*6),use_thread_group)
-
-    #         # if len(inds) > 1:
-    #         #     select_var_vals = [("int", "jid", [str(jid) for jid in inds])]
-    #         #     self.gen_add_multi_threaded_select("parallel_ind", "< ", [str(6*(i+1)) for i in range(len(inds))], select_var_vals)
-    #         #     jid = "jid"
-    #         # else:
-    #         #     jid = str(inds[0])
-    #         #     self.gen_add_code_line("int jid = " + str(jid) + ";")
-
-    #         # self.gen_add_code_line("s_parent_inds[jid] = " + str(parent_ind_cpp_par) + ";")
-    #         # #self.gen_add_code_line("s_inds[jid] = " + str(jid) + ";")
-    #         # self.gen_add_end_control_flow()
-    #         # self.gen_add_sync(use_thread_group)
-            
-    #         # self.gen_add_parallel_loop("parallel_ind",str(len(inds)*6),use_thread_group)
-
-    #         # if len(inds) > 1:
-    #         #     select_var_vals = [("int", "jid", [str(jid) for jid in inds])]
-    #         #     self.gen_add_multi_threaded_select("parallel_ind", "< ", [str(6*(i+1)) for i in range(len(inds))], select_var_vals)
-    #         #     jid = "jid"
-    #         # else:
-    #         #     jid = str(inds[0])
-    #         #     self.gen_add_code_line("int jid = " + str(jid) + ";")
-            
-    #         # self.gen_add_code_line("int jid6 = jid * 6; int row = parallel_ind % 6;")
-    #         # #self.gen_add_code_line("int row = parallel_ind % 6; int col = (parallel_ind / 7) % 7;")
-    #         # #self.gen_add_code_line("int curr_joint = s_inds[jid];")
-    #         # self.gen_add_code_line("int curr_parent = s_parent_inds[jid];")
-            
-    #         # #self.gen_add_code_line("if(s_parent_inds[jid + row*7] != -1){s_fh[curr_joint] = dot_prod<T,6,1,1>(&s_XImats[6*jid6 + curr_joint*6], &s_fh[jid + row*7]);}")
-    #         # #self.gen_add_code_line("if(s_parent_inds[parallel_ind] != -1){s_fh[row*7 + curr_joint] = dot_prod<T,6,1,7>(&s_XImats[6*jid6 + 6*row], &s_fh[row*7 + curr_joint]);}")
-    #         # self.gen_add_code_line("s_fh[jid6 + row] = dot_prod<T,6,1,1>(&s_XImats[36*(curr_parent+1) + 6*row], &s_fh[jid6]);")
-
-    #         # self.gen_add_end_control_flow()
-    #         # self.gen_add_sync(use_thread_group)
-
-    #         self.gen_add_parallel_loop("parallel_ind",str(len(inds)*6),use_thread_group)
-    #         if len(inds) > 1:
-    #             select_var_vals = [("int", "jid", [str(jid) for jid in inds])]
-    #             self.gen_add_multi_threaded_select("parallel_ind", "< ", [str(6*(i+1)) for i in range(len(inds))], select_var_vals)
-    #             jid = "jid"
-    #             self.gen_add_code_line("int jidn = jid * " + str(n) + "; int jid6 = jid * 6;" )
-    #             #self.gen_add_code_line("int row = parallel_ind % 7; int col = (parallel_ind / 7) % 7;")
-    #             #self.gen_add_code_line("int curr_joint = s_inds[parallel_ind];")
-    #             #self.gen_add_code_line("int curr_parent = s_parent_inds[parallel_ind];")
-
-    #             self.gen_add_code_line("if((jid-1) != -1){")
-    #             self.gen_add_code_line("    s_M[jid-1 + jidn] = s_fh[jid6 + " + S_ind_cpp_par + "];")  
-    #             self.gen_add_code_line("    s_M[jid + (jid-1)*" + str(n) + "] = s_M[jid-1 + jidn];")
-    #         else:
-    #             jid = str(inds[0])
-    #             self.gen_add_code_line("int jid = " + str(jid) + ";")
-            
-    #             self.gen_add_code_line("int jidn = jid * " + str(n) + "; int jid6 = jid * 6;" )
-    #             #self.gen_add_code_line("int row = parallel_ind % 7; int col = (parallel_ind / 7) % 7;")
-    #             #self.gen_add_code_line("int curr_joint = s_inds[parallel_ind];")
-    #             self.gen_add_code_line("int curr_parent = s_parent_inds[parallel_ind];")
-
-    #             self.gen_add_code_line("if(s_parent_inds[jid] != -1){")
-    #             self.gen_add_code_line("    s_M[jid + curr_parent*" + str(n) + "] = s_fh[jid6 + " + S_ind_cpp_par + "];") 
-    #             self.gen_add_code_line("    s_M[curr_parent + jidn] = s_M[jid + curr_parent*" + str(n) + "];")
-
-    #             #self.gen_add_code_line("    if(s_j[jid] == " + str(S_ind_cpp) +"){s_M[jid + j_jid*7] = s_fh[jid];} else {s_M[jid + j_jid*7] = 0;}")
-    #             #self.gen_add_code_line("    s_M[j_jid + jid*7] = s_M[jid + j_jid*7];")
-    #         self.gen_add_code_line("}")
-
-    #         self.gen_add_end_control_flow()
-    #         self.gen_add_sync(use_thread_group)       
-  
-    # self.gen_add_end_function()
 
 def gen_crba_device_temp_mem_size(self):
     n = self.robot.get_num_pos()

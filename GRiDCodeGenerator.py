@@ -359,7 +359,6 @@ class GRiDCodeGenerator:
         self.gen_forward_dynamics(use_thread_group)
         self.gen_inverse_dynamics_gradient(use_thread_group)
         self.gen_forward_dynamics_gradient(use_thread_group)
-        print('crba is still under development')
         if self.robot.floating_base: print('eepos, aba, crba, and debug mode are still under development for floating base')
         else:
             self.gen_aba(use_thread_group)
