@@ -45,3 +45,24 @@ def gen_invert_matrix(self, use_thread_group=False):
     self.gen_add_end_control_flow()
     self.gen_add_end_function()
     return
+
+
+def gen_matmul(self):
+    """
+    Generates the matrix multiplication helper function.
+    """
+    self.gen_add_func_doc("Matrix multiplication helper function of AB", [], \
+                          ['index - the index of the result vector', \
+                           'A - pointer to the first matrix', \
+                           'B - pointer to the second matrix', \
+                           'dest - pointer to the destination matrix', \
+                           'num - 36 or 6 depending on the indexing scheme', \
+                           't - true => multiply with the transpose of B'])
+    self.gen_add_code_line("template <typename T>")
+    self.gen_add_code_line("__device__")
+    self.gen_add_code_line("void matmul(int index, T *A, T *B, T *dest, int num, bool t) {", True)
+    self.gen_add_code_line("int cur = 36*((index/num)%7);")
+    self.gen_add_code_line("T *vec1 = &B[cur + (t*5+1)*(index%6)];")
+    self.gen_add_code_line("T *vec2 = &A[6*(index/6)];")
+    self.gen_add_code_line("dest[index] = dot_prod<T,6, 6, 1>(vec1, vec2);")
+    self.gen_add_end_function()
