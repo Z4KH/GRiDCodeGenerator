@@ -45,3 +45,55 @@ def gen_invert_matrix(self, use_thread_group=False):
     self.gen_add_end_control_flow()
     self.gen_add_end_function()
     return
+
+
+def gen_matmul(self):
+    """
+    Generates the matrix multiplication helper function.
+    This function allows for a transpose of B
+    """
+    self.gen_add_func_doc("Matrix multiplication helper function of AB", [], \
+                          ['index - the index of the result vector', \
+                           'A - pointer to the first matrix', \
+                           'B - pointer to the second matrix', \
+                           'dest - pointer to the destination matrix', \
+                           'num - 36 or 6 depending on the indexing scheme', \
+                           't - true => multiply with the transpose of B'])
+    self.gen_add_code_line("template <typename T>")
+    self.gen_add_code_line("__device__")
+    self.gen_add_code_line("void matmul(int index, T *A, T *B, T *dest, int num, bool t) {", True)
+    self.gen_add_code_line("int cur = 36*((index/num)%7);")
+    self.gen_add_code_line("T *vec1 = &B[cur + (t*5+1)*(index%6)];")
+    self.gen_add_code_line("T *vec2 = &A[6*(index/6)];")
+    self.gen_add_code_line("dest[index] = dot_prod<T,6, 6, 1>(vec1, vec2);")
+    self.gen_add_end_function()
+
+
+def gen_matmul_trans(self):
+    """
+    Generates the matrix multiplication helper function where one of the
+    matrices is transposed. Both A and B are 6x6 matrices.
+    """
+    self.gen_add_func_doc("Matrix multiplication helper function where one of the matrices is tranposed.", [], \
+                          ['index - the index of the result vector', \
+                           'A - pointer to the first 6x6 matrix', \
+                           'B - pointer to the second 6x6 matrix', \
+                           'dest - pointer to the destination matrix', \
+                           'char trans_mat - a for A^TB, b for AB^T'])
+    self.gen_add_code_line("template <typename T>")
+    self.gen_add_code_line("__device__")
+    self.gen_add_code_line("void matmul_trans(int index, T *A, T *B, T *dest, char trans_mat) {", True)
+    self.gen_add_code_line("T *vec1;")
+    self.gen_add_code_line("T *vec2;")
+    self.gen_add_code_line("if (trans_mat == 'a'){", True)
+    self.gen_add_code_line("vec1 = &A[6*(index%6)];")
+    self.gen_add_code_line("vec2 = &B[6*(index/6)];")
+    self.gen_add_code_line("dest[index] = dot_prod<T,6,1,1>(vec1, vec2);")
+    self.gen_add_end_control_flow()
+    self.gen_add_code_line("if (trans_mat == 'b'){", True)
+    self.gen_add_code_line("vec1 = &A[index%6];")
+    self.gen_add_code_line("vec2 = &B[index/6];")
+    self.gen_add_code_line("dest[index] = dot_prod<T,6,6,6>(vec1, vec2);")
+    self.gen_add_end_control_flow()
+    self.gen_add_end_function()
+
