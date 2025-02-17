@@ -15,7 +15,7 @@ def gen_idsva_so_inner_function_call(self, use_thread_group = False, use_qdd_inp
     if updated_var_names is not None:
         for key,value in updated_var_names.items():
             var_names[key] = value
-    id_so_code_start = "idsva_so_inner<T>(" + var_names["s_idsva_so_name"] + ", " + var_names["s_q_name"] + ", " + var_names["s_qd_name"] + ", "
+    id_so_code_start = "idsva_so_inner<T>(" + var_names["s_idsva_so_name"] + ", " + var_names["s_q_name"] + ", " + var_names["s_qd_name"] + ", " + var_names["s_qdd_name"] + ", "
     id_so_code_middle = self.gen_insert_helpers_function_call()
     id_so_code_end = f'' + var_names["s_mem_name"] + ", " + var_names["gravity_name"] + ");"
     if use_thread_group:
@@ -28,18 +28,19 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     Generates the inner device function to compute the second order
     idsva.
     """
+    # TODO - branching
     NV = self.robot.get_num_vel()
-    NJ = self.robot.get_num_joints()
 
     # construct the boilerplate and function definition
     func_params = ["s_idsva_so is a pointer to memory for the final result of size 4*NUM_JOINTS*NUM_JOINTS*NUM_JOINTS = " + str(4*NV**3), \
                    "s_q is the vector of joint positions", \
                    "s_qd is the vector of joint velocities", \
-# TODO - shared memory size
+                   "s_qdd is the vector of joint accelerations", \
+    # TODO - shared memory size
                    "s_mem is a pointer to helper shared memory of size  = " + \
                             str(self.gen_idsva_so_inner_temp_mem_size()), \
                    "gravity is the gravity constant"]
-    func_def_start = "void idsva_so_inner(T *s_idsva_so, const T *s_q, const T *s_qd, "
+    func_def_start = "void idsva_so_inner(T *s_idsva_so, const T *s_q, const T *s_qd, T *s_qdd, "
     func_def_end = "T *s_mem, const T gravity) {"
     func_def_start, func_params = self.gen_insert_helpers_func_def_params(func_def_start, func_params, -2)
     func_notes = ["Assumes s_XImats is updated already for the current s_q"]
@@ -53,15 +54,51 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_code_line("__device__")
     self.gen_add_code_line(func_def, True)
 
+
+    # MEMORY LAYOUT (s_mem):
+        # Xup(36 * NJ)/Xdown(36*NJ)/
+            # vJ(6 * NJ)/f(6*NJ) & 
+            # v(6 * NJ) & 
+            # Sd(6 * NJ) & 
+            # aJ(6 * NJ) * 
+            # a(6 * NJ) & 
+            # psid(6 * NJ)
+        # IC (36 * NJ)
+        # I_Xup (36 * NJ)/
+            # S (6*NJ) & 
+            # psidd (6 * NJ) & 
+            # a_world (6)
+        # BC (36 * NJ)
+        # crm_v (36 * NJ)
+        # crf_v (36 * NJ)
+        # IC_v (36 * NJ)
+
     vars = [
-        '// Relevant Tensors',
+        '// Relevant Tensors in the order they appear',
         'T *I = s_XImats + XIMAT_SIZE*NUM_JOINTS;', # Inertia Matrices (6x6 for each joint)
         'T *Xup = s_mem;', # Spatial Transforms from parent to child (6x6 for each joint)
-        'T *Xdown = Xup + XIMAT_SIZE*NUM_JOINTS;', # Spatial Transforms from child to parent (6x6 for each joint)
-        'T *IC = Xdown + XIMAT_SIZE*NUM_JOINTS;\n', # Centroidal Inertia (6x6 for each joint)
+        'T *IC = Xup + XIMAT_SIZE*NUM_JOINTS;', # Centroidal Inertia (6x6 for each joint)
+        # Xup, I_Xup done being used
+        'T *Xdown = Xup;\n', # Spatial Transforms from child to parent (6x6 for each joint)
+        'T *S = IC + XIMAT_SIZE*NUM_JOINTS;', # Transformed Joint Subspace Tensors (6x1 for each joint)
+        # Xdown done being used
+        'T *vJ = Xdown;', # Non-propogated Joint Spatial velocities (6x1 for each joint),
+        'T *v = vJ + 6*NUM_JOINTS;', # Joint Spatial velocities (6x1 for each joint),
+        'T *Sd = v + 6*NUM_JOINTS;', # Time derivative of Joint subspace tensor due to each joint moving (6x1 for each joint),
+        'T *aJ = Sd + 6*NUM_JOINTS;', # Non-propogated Joint Spatial accelerations (6x1 for each joint),
+        'T *a = aJ + 6*NUM_JOINTS;', # Joint Spatial accelerations (6x1 for each joint),
+        'T *psid = a + 6*NUM_JOINTS;', # Time derivative of joint subspace tensor due to each joint's parent moving (6x1 for each joint),
+        'T *psidd = S + 6*NUM_JOINTS;', # 2nd Time derivative of joint subspace tensor due to each joint's parent moving (6x1 for each joint),
+        'T *a_world = psidd + 6*NUM_JOINTS;', # Acceleration of the world frame (6x1)',
+        'T *BC = a_world + 6;', # Composite body-Coriolis Bias tensor (6x6 for each joint)',
+        'T *f = vJ;' # Joint Spatial forces (6x1 for each joint),
 
-        '// Temporary Variables for Comptuations',
-        'T *I_Xup = IC + XIMAT_SIZE*NUM_JOINTS;', # Temporary to compute IC for I * Xup (6x6 for each joint)
+        '\n\n',
+        '// Temporary Variables for Computations',
+        'T *I_Xup = S;', # Temporary to compute IC for I * Xup (6x6 for each joint)
+        'T *crm_v = BC + 36*NUM_JOINTS;', # Motion cross product of v (6x6 for each joint)
+        'T *crf_v = crm_v + 36*NUM_JOINTS;', # Force cross product of v (6x6 for each joint)',
+        'T *IC_v = crf_v + 36*NUM_JOINTS;', # IC @ v (6x6 for each joint)',
     ]
     # TODO add #define for Xmat size & other consts
     self.gen_add_code_lines(vars)
@@ -74,7 +111,9 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_parallel_loop('i','XIMAT_SIZE',use_thread_group) 
     self.gen_add_code_line('Xup[i] = s_XImats[i];')
     self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
     # Next, loop over remaining joints
+    self.gen_add_code_line('#pragma unroll')
     self.gen_add_code_line('for (int joint = 1; joint < NUM_JOINTS; ++joint) {', 1)
     self.gen_add_code_line('// Compute Xup[joint]')
     self.gen_add_code_line('int X_idx = joint*XIMAT_SIZE;')
@@ -108,22 +147,152 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_code_line("\n\n")
     self.gen_add_code_line("// Compute Xdown - child to parent transformation matrices")
     self.gen_add_parallel_loop('i','XIMAT_SIZE*NUM_JOINTS',use_thread_group)
-    self.gen_add_code_line('int mat_idx = (i / XIMAT_SIZE) * XIMAT_SIZE;')
+    self.gen_add_code_line('T temp = Xup[i]; // Xup and Xdown are in the same memory')
     self.gen_add_code_line('int sub_idx = i % XIMAT_SIZE;')
     # TODO fix magic numbers
-    self.gen_add_code_line('if (sub_idx % 18 == 1 | sub_idx % 18 == 4 | sub_idx % 18 == 8 | sub_idx % 18 == 11) {', True)
+    self.gen_add_code_line('if (sub_idx % 18 == 1 || sub_idx % 18 == 4 || sub_idx % 18 == 8 || sub_idx % 18 == 11) {', True)
     self.gen_add_code_line(f'Xdown[i] = Xup[i+5];')
-    self.gen_add_code_line(f'Xdown[i+5] = Xup[i];')
+    self.gen_add_code_line(f'Xdown[i+5] = temp;')
     self.gen_add_end_control_flow()
-    self.gen_add_code_line('else if (sub_idx % 18 == 2 | sub_idx % 18 == 5) {', True)
+    self.gen_add_code_line('else if (sub_idx % 18 == 2 || sub_idx % 18 == 5) {', True)
     self.gen_add_code_line(f'Xdown[i] = Xup[i+10];')
-    self.gen_add_code_line('Xdown[i+10] = Xup[i];')
+    self.gen_add_code_line('Xdown[i+10] = temp;')
     self.gen_add_end_control_flow()
-    self.gen_add_code_line(f'else Xdown[i] = Xup[i];')
+    self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
+
+    # Transform S
+    parent_ind_cpp, S_ind_cpp = self.gen_topology_helpers_pointers_for_cpp([i for i in range(NV)], NO_GRAD_FLAG = True)
+    self.gen_add_code_line("\n\n")
+    self.gen_add_code_line('// Transform S')
+    self.gen_add_parallel_loop('i','6*NUM_JOINTS',use_thread_group)
+    self.gen_add_code_line('int joint = i / 6;')
+    self.gen_add_code_line(f'S[i] = Xdown[joint*XIMAT_SIZE + {S_ind_cpp}*6 + (i % 6)];')
+    self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
+
+    # Compute vJ = S @ qd & aJ = S @ qdd in parallel
+    self.gen_add_code_line("\n\n")
+    self.gen_add_code_line('// Compute vJ = S @ qd & aJ = S @ qdd')
+    self.gen_add_parallel_loop('i','2*6*NUM_JOINTS',use_thread_group)
+    self.gen_add_code_line('int joint = i / 6;')
+    self.gen_add_code_line('if (joint < NUM_JOINTS) vJ[i] = S[i] * s_qd[joint];')
+    self.gen_add_code_line('else aJ[i - 6*NUM_JOINTS] = S[i - 6*NUM_JOINTS] * s_qdd[joint - NUM_JOINTS];')
+    self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
+
+    # Compute v = v[parent] + vJ
+    self.gen_add_code_line("\n\n")
+    self.gen_add_code_line('// Compute v = v[parent] + vJ')
+    self.gen_add_code_line('#pragma unroll')
+    self.gen_add_code_line('for (int jid = 0; jid < NUM_JOINTS; ++jid) {', 1)
+    self.gen_add_parallel_loop('i','6',use_thread_group)
+    self.gen_add_code_line('if (jid == 0) v[i] = vJ[i];')
+    self.gen_add_code_line(f'else v[jid*6 + i] = v[{parent_ind_cpp}*6 + i] + vJ[jid*6 + i];')
+    self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
+    self.gen_add_end_control_flow()
+
+    # Finish aJ += crm(v[parent])@vJ
+    self.gen_add_code_line("\n\n")
+    self.gen_add_code_line('// Finish aJ += crm(v[parent])@vJ')
+    self.gen_add_code_line('// For base, v[parent] = 0')
+    self.gen_add_parallel_loop('i','6*(NUM_JOINTS-1)',use_thread_group)
+    self.gen_add_code_line('int jid = 1 + (i / 6); // Skip base joint')
+    self.gen_add_code_line('int index = i % 6;')
+    self.gen_add_code_line(f'aJ[6+i] += crm_mul<T>(index, &v[{parent_ind_cpp}*6], &vJ[jid*6]); // Skip Base Joint')
+    self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
+
+    # Compute Sd = crm(v) @ S & psid = crm(v[parent]) @ S
+    self.gen_add_code_line("\n\n")
+    self.gen_add_code_line('// Compute Sd = crm(v) @ S & psid = crm(v[parent]) @ S')
+    self.gen_add_code_line('// For base, v[parent] = 0')
+    self.gen_add_parallel_loop('i','2*6*NUM_JOINTS',use_thread_group)
+    self.gen_add_code_line('int jid = (i / 6) % NUM_JOINTS;')
+    self.gen_add_code_line('int index = i % 6;')
+    self.gen_add_code_line('if (i < 6*NUM_JOINTS) Sd[i] = crm_mul<T>(index, &v[jid*6], &S[jid*6]);')
+    self.gen_add_code_line('else {', True)
+    self.gen_add_code_line('if (jid == 0) psid[index] = 0;')
+    self.gen_add_code_line(f'else psid[i - 6 * NUM_JOINTS] = crm_mul<T>(index, &v[{parent_ind_cpp}*6], &S[jid*6]);')   
+    self.gen_add_end_control_flow()
+    self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
+
+    # Compute a = a[parent] + aJ
+    self.gen_add_code_line("\n\n")
+    self.gen_add_code_line('// Compute a = a[parent] + aJ')
+    self.gen_add_code_line('#pragma unroll')
+    self.gen_add_code_line('for (int jid = 0; jid < NUM_JOINTS; ++jid) {', 1)
+    self.gen_add_parallel_loop('i','6',use_thread_group)
+    self.gen_add_code_line("if (jid == 0) a[i] = aJ[i] + s_XImats[5*6 + i] * gravity; // Base joint's parent is the world")
+    self.gen_add_code_line(f'else a[jid*6 + i] = a[{parent_ind_cpp}*6 + i] + aJ[jid*6 + i];')
+    self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
+    self.gen_add_end_control_flow()
+
+    # Initialize a_world
+    self.gen_add_code_line("\n\n")
+    self.gen_add_code_line('// Initialize a_world')
+    self.gen_add_parallel_loop('i','6',use_thread_group)
+    self.gen_add_code_line('if (i < 5) a_world[i] = 0;')
+    self.gen_add_code_line('else a_world[5] = gravity;')
+    self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
+    
+    # Compute psidd = crm(a[parent])@S + crm(v[parent])@psid
+    self.gen_add_code_line("\n\n")
+    self.gen_add_code_line('// Compute psidd = crm(a[parent])@S + crm(v[:,i])@psid[:,i] & IC @ v (for BC) in parallel')
+    self.gen_add_parallel_loop('i','2*6*NUM_JOINTS',use_thread_group)
+    self.gen_add_code_line('int jid = (i / 6) % NUM_JOINTS;')
+    self.gen_add_code_line('int index = i % 6;')
+    self.gen_add_code_line('if (i < 6*NUM_JOINTS) {', True)
+    self.gen_add_code_line('if (jid == 0) psidd[i] = crm_mul<T>(index, a_world, S) + crm_mul<T>(index, v, psid);')
+    self.gen_add_code_line(f'else psidd[i] = crm_mul<T>(index, &a[{parent_ind_cpp}*6], &S[jid*6]) + crm_mul<T>(index, &v[{parent_ind_cpp}*6], &psid[jid*6]);')
+    self.gen_add_end_control_flow()
+    self.gen_add_code_line(f'else IC_v[i - 6*NUM_JOINTS] = dot_prod<T, 6, 6, 1>(&IC[index + jid*36], &v[jid*6]);')
+    self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
+
+    # Begin BC Computation
+    # First Compute crm(v) & crf(v), IC @ v
+    self.gen_add_code_line("\n\n")
+    self.gen_add_code_line('// Need crm(v), crf(v) for BC computation')
+    self.gen_add_parallel_loop('i','2*36*NUM_JOINTS',use_thread_group)
+    self.gen_add_code_line('int jid = (i / 36) % NUM_JOINTS;')
+    self.gen_add_code_line('int col = (i / 6) % 6;')
+    self.gen_add_code_line('int row = i % 6;')
+    self.gen_add_code_line('if (i < 36*NUM_JOINTS) crm_v[i] = crm<T>(i % 36, &v[jid*6]);')
+    self.gen_add_code_line('else crf_v[(jid*36) + row*6 + col] = -crm<T>(i % 36, &v[jid*6]); // crf is negative tranpose of crm')
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
 
 
+    # Finish BC = crf(v) @ IC + icrf(IC @ v) - IC @ crm(v)
+    self.gen_add_code_line("\n\n")
+    self.gen_add_code_line('// Finish BC = crf(v) @ IC + icrf(IC @ v) - IC @ crm(v)')
+    self.gen_add_parallel_loop('i','36*NUM_JOINTS',use_thread_group)
+    self.gen_add_code_line('int jid = i / 36;')
+    self.gen_add_code_line('int row = i % 6;')
+    self.gen_add_code_line('int col_idx = (i / 6) * 6;')
+    self.gen_add_code_line('BC[i] = dot_prod<T, 6, 6, 1>(&crf_v[jid*36 + row], &IC[col_idx]) +')
+    self.gen_add_code_line('        icrf<T>(i % 36, &IC_v[jid*6]) -')
+    self.gen_add_code_line('        dot_prod<T, 6, 6, 1>(&IC[jid*36 + row], &crm_v[col_idx]);')
+    self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
+
+    # Next f = IC @ a + crf(v) @ IC @ v
+    self.gen_add_code_line("\n\n")
+    self.gen_add_code_line('// Compute f = IC @ a + crf(v) @ IC @ v')
+    self.gen_add_parallel_loop('i','6*NUM_JOINTS',use_thread_group)
+    self.gen_add_code_line('int jid = i / 6;')
+    self.gen_add_code_line('int row = i % 6;')
+    self.gen_add_code_line('f[i] = dot_prod<T, 6, 6, 1>(&IC[jid*36 + row], &a[jid*6]) +')
+    self.gen_add_code_line('        dot_prod<T, 6, 6, 1>(&crf_v[jid*36 + row], &IC_v[jid*6]);')
+    self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
+
+    
     self.gen_add_end_function()
         
 
@@ -176,19 +345,17 @@ def gen_idsva_so_kernel(self, use_thread_group = False, use_qdd_input = False, s
     NJ = self.robot.get_num_joints()
     # define function def and params
     func_params = ["d_idsva_so is a pointer to memory for the final result of size 4*NUM_JOINTS*NUM_JOINTS*NUM_JOINTS = " + str(4*n**3), \
-                   "d_q_dq is the vector of joint positions and velocities", \
-                   "stride_q_qd is the stide between each q, qd", \
+                   "d_q_dq_u is the vector of joint positions, velocities, and accelerations", \
+                   "stride_q_qd_u is the stide between each q, qd, u", \
                    "d_robotModel is the pointer to the initialized model specific helpers on the GPU (XImats, topology_helpers, etc.)", \
                    "gravity is the gravity constant", \
                    "num_timesteps is the length of the trajectory points we need to compute over (or overloaded as test_iters for timing)"]
     func_notes = []
-    func_def_start = "void idsva_so_kernel(T *d_idsva_so, const T *d_q_qd, const int stride_q_qd, "
+    func_def_start = "void idsva_so_kernel(T *d_idsva_so, const T *d_q_qd_u, const int stride_q_qd_u, "
     func_def_end = "const robotModel<T> *d_robotModel, const T gravity, const int NUM_TIMESTEPS) {"
-    if use_qdd_input:
+    if use_qdd_input: # TODO
         func_def_start += "const T *d_qdd, "
         func_params.insert(-2,"d_qdd is the vector of joint accelerations")
-    else:
-        func_notes.append("optimized for qdd = 0")
     func_def = func_def_start + func_def_end
     if single_call_timing:
         func_def = func_def.replace("kernel(", "kernel_single_timing(")
@@ -198,7 +365,7 @@ def gen_idsva_so_kernel(self, use_thread_group = False, use_qdd_input = False, s
     self.gen_add_code_line("__global__")
     self.gen_add_code_line(func_def, True)
     # add shared memory variables
-    shared_mem_vars = ["__shared__ T s_q_qd[" + str(n + NUM_POS) + "]; T *s_q = s_q_qd; T *s_qd = &s_q_qd[" + str(NUM_POS) + "];", \
+    shared_mem_vars = [f"__shared__ T s_q_qd_u[{n*2+NUM_POS}]; T *s_q = s_q_qd_u; T *s_qd = &s_q_qd_u[{NUM_POS}]; T *s_qdd = &s_q_qd_u[{NUM_POS + n}];", \
                     f"__shared__ T s_idsva_so[{4*n**3}];", f"__shared__ T s_mem[{11040}];"] # TODO where did the s_mem size come from?
 
     if use_qdd_input:
@@ -209,24 +376,24 @@ def gen_idsva_so_kernel(self, use_thread_group = False, use_qdd_input = False, s
     if not single_call_timing:
         # load to shared mem and loop over blocks to compute all requested comps
         self.gen_add_parallel_loop("k","NUM_TIMESTEPS",use_thread_group,block_level = True)
-        if use_qdd_input:
+        if use_qdd_input: # TODO
             self.gen_kernel_load_inputs("q_qd","stride_q_qd",str(n + NUM_POS),use_thread_group,"qdd",str(n),str(n))
         else:
-            self.gen_kernel_load_inputs("q_qd","stride_q_qd",str(n + NUM_POS),use_thread_group)
+            self.gen_kernel_load_inputs("q_qd_u","stride_q_qd_u",str(2*n + NUM_POS),use_thread_group)
         # compute
         self.gen_add_code_line("// compute")
         self.gen_load_update_XImats_helpers_function_call(use_thread_group)
         self.gen_idsva_so_inner_function_call(use_thread_group)
         self.gen_add_sync(use_thread_group)
-        # save to global
+        # save to global TODO - why is this breaking everything
         # self.gen_kernel_save_result("idsva_so",str(4*n**3),str(4*n**3),use_thread_group) # TODO - WHY IS THIS BREAKING EVERYTHING
         self.gen_add_end_control_flow()
     else:
         #repurpose NUM_TIMESTEPS for number of timing reps
-        if use_qdd_input:
+        if use_qdd_input: # TODO
             self.gen_kernel_load_inputs_single_timing("q_qd",str(2*n),use_thread_group,"qdd",str(n))
         else:
-            self.gen_kernel_load_inputs_single_timing("q_qd",str(2*n),use_thread_group)
+            self.gen_kernel_load_inputs_single_timing("q_qd_u",str(NUM_POS + 2*n),use_thread_group)
         # then compute in loop for timing
         self.gen_add_code_line("// compute with NUM_TIMESTEPS as NUM_REPS for timing")
         self.gen_add_code_line("for (int rep = 0; rep < NUM_TIMESTEPS; rep++){", True)
@@ -264,8 +431,8 @@ def gen_idsva_so_host(self, mode = 0):
     self.gen_add_code_line("__host__")
     self.gen_add_code_line(func_def_start)
     self.gen_add_code_line(func_def_end, True)
-    func_call_start = "idsva_so_kernel<T><<<block_dimms,thread_dimms,ID_DYNAMIC_SHARED_MEM_COUNT*sizeof(T)>>>(hd_data->d_idsva_so, \
-        hd_data->d_q_qd,stride_q_qd,"
+    func_call_start = "idsva_so_kernel<T><<<block_dimms,thread_dimms,ID_DYNAMIC_SHARED_MEM_COUNT*sizeof(T)>>>(hd_data->d_idsva_so," + \
+        "hd_data->d_q_qd_u,stride_q_qd,"
     func_call_end = "d_robotModel,gravity,num_timesteps);"
     if single_call_timing:
         func_call_start = func_call_start.replace("kernel<T>","kernel_single_timing<T>")
@@ -288,16 +455,19 @@ def gen_idsva_so_host(self, mode = 0):
         self.gen_add_code_line("int stride_q_qd = USE_COMPRESSED_MEM ? 2*NUM_JOINTS: 3*NUM_JOINTS;")
     # then compute but adjust for compressed mem and qdd usage
     self.gen_add_code_line("// then call the kernel")
-    func_call = func_call_start + func_call_end
-    func_call_with_qdd = func_call_start + "hd_data->d_qdd, " + func_call_end
-    # add in compressed mem adjusts
-    func_call_mem_adjust = "    if (USE_COMPRESSED_MEM) {" + func_call + "}"
-    func_call_mem_adjust2 = "    else                    {" + func_call.replace("hd_data->d_q_qd","hd_data->d_q_qd_u") + "}"
-    func_call_with_qdd_mem_adjust = "    if (USE_COMPRESSED_MEM) {" + func_call_with_qdd + "}"
-    func_call_with_qdd_mem_adjust2 = "    else                    {" + func_call_with_qdd.replace("hd_data->d_q_qd","hd_data->d_q_qd_u") + "}"
+    # TODO - qdd=0 optimization
+    # func_call = func_call_start + func_call_end
+    # func_call_with_qdd = func_call_start + "hd_data->d_qdd, " + func_call_end
+    # # add in compressed mem adjusts
+    # func_call_mem_adjust = "    if (USE_COMPRESSED_MEM) {" + func_call + "}"
+    # func_call_mem_adjust2 = "    else                    {" + func_call.replace("hd_data->d_q_qd","hd_data->d_q_qd_u") + "}"
+    # func_call_with_qdd_mem_adjust = "    if (USE_COMPRESSED_MEM) {" + func_call_with_qdd + "}"
+    # func_call_with_qdd_mem_adjust2 = "    else                    {" + func_call_with_qdd.replace("hd_data->d_q_qd","hd_data->d_q_qd_u") + "}"
     # compule into a set of code
-    func_call_code = ["if (USE_QDD_FLAG) {", func_call_with_qdd_mem_adjust, func_call_with_qdd_mem_adjust2, "}", \
-                      "else {", func_call_mem_adjust, func_call_mem_adjust2, "}", "gpuErrchk(cudaDeviceSynchronize());"]
+    # func_call_code = ["if (USE_QDD_FLAG) {", func_call_with_qdd_mem_adjust, func_call_with_qdd_mem_adjust2, "}", \
+    #                   "else {", func_call_mem_adjust, func_call_mem_adjust2, "}", "gpuErrchk(cudaDeviceSynchronize());"]
+    
+    func_call_code = [f'{func_call_start}{func_call_end}']
     # wrap function call in timing (if needed)
     if single_call_timing:
         func_call_code.insert(0,"struct timespec start, end; clock_gettime(CLOCK_MONOTONIC,&start);")
@@ -315,14 +485,12 @@ def gen_idsva_so_host(self, mode = 0):
     self.gen_add_end_function()
 
 def gen_idsva_so(self, use_thread_group = False):
+    # TODO - qdd=0 optimization
     # gen the inner code
     self.gen_idsva_so_inner(use_thread_group)
-    # gen the wrapper code for with and without qdd
-    self.gen_idsva_so_device(use_thread_group,True)
+    # gen the wrapper code for device fn
     self.gen_idsva_so_device(use_thread_group,False)
     # and the kernels
-    self.gen_idsva_so_kernel(use_thread_group,True,True)
-    self.gen_idsva_so_kernel(use_thread_group,True,False)
     self.gen_idsva_so_kernel(use_thread_group,False,True)
     self.gen_idsva_so_kernel(use_thread_group,False,False)
     # and host wrapeprs
