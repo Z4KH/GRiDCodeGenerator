@@ -57,10 +57,10 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
 
     # MEMORY LAYOUT (s_mem):
         # Xup(36 * NJ)/Xdown(36*NJ)/
-            # vJ(6 * NJ)/f(6*NJ) & 
-            # v(6 * NJ) & 
+            # vJ(6 * NJ)/f(6*NJ)/ICT_S(6*NJ) & 
+            # v(6 * NJ)/psid+Sd(6*NJ) & 
             # Sd(6 * NJ) & 
-            # aJ(6 * NJ) * 
+            # aJ(6 * NJ)/IC_v (6 * NJ)/IC_S (6*NJ)/T1 (6*NJ) & 
             # a(6 * NJ) & 
             # psid(6 * NJ)
         # IC (36 * NJ)
@@ -68,10 +68,21 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
             # S (6*NJ) & 
             # psidd (6 * NJ) & 
             # a_world (6)
+            # T2 (6*NJ)
+            # T3 (6*NJ)
+            # T4 (6*NJ)
         # BC (36 * NJ)
-        # crm_v (36 * NJ)
-        # crf_v (36 * NJ)
-        # IC_v (36 * NJ)
+        # B_IC_S (36*NJ)/D3 (36*NJ)
+        # B_IC_psid (36*NJ)
+        # crm_v (36 * NJ)/crm_S (36*NJ)
+        # crf_v (36 * NJ)/crf_S (36*NJ)
+        # crm_psid (36 * NJ)
+        # crf_psid (36 * NJ)
+        # IC_psid (6 * NJ)
+        # icrf_f (36 * NJ)/D1 (36*NJ)
+        # D2 (36*NJ)
+        # D4 (36*NJ)
+        # t - t1/t2/t3/t4/t5/t6/t7/t8/t9 [(\sum_{i=1}^NJ i) * 36]
 
     vars = [
         '// Relevant Tensors in the order they appear',
@@ -90,17 +101,47 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
         'T *psid = a + 6*NUM_JOINTS;', # Time derivative of joint subspace tensor due to each joint's parent moving (6x1 for each joint),
         'T *psidd = S + 6*NUM_JOINTS;', # 2nd Time derivative of joint subspace tensor due to each joint's parent moving (6x1 for each joint),
         'T *a_world = psidd + 6*NUM_JOINTS;', # Acceleration of the world frame (6x1)',
-        'T *BC = a_world + 6;', # Composite body-Coriolis Bias tensor (6x6 for each joint)',
+        'T *BC = S + 36*NUM_JOINTS;', # Composite body-Coriolis Bias tensor (6x6 for each joint)',
         'T *f = vJ;' # Joint Spatial forces (6x1 for each joint),
+        'T *B_IC_S = BC + 36*NUM_JOINTS;', # Body coriolis tensor wrt joint subspace (6x6 for each joint)',
+        'T *B_IC_psid = B_IC_S + 36*NUM_JOINTS;', # Body coriolis tensor wrt psid (6x6 for each joint)',
 
         '\n\n',
         '// Temporary Variables for Computations',
         'T *I_Xup = S;', # Temporary to compute IC for I * Xup (6x6 for each joint)
-        'T *crm_v = BC + 36*NUM_JOINTS;', # Motion cross product of v (6x6 for each joint)
+        'T *crm_v = B_IC_psid + 36*NUM_JOINTS;', # Motion cross product of v (6x6 for each joint)
         'T *crf_v = crm_v + 36*NUM_JOINTS;', # Force cross product of v (6x6 for each joint)',
-        'T *IC_v = crf_v + 36*NUM_JOINTS;', # IC @ v (6x6 for each joint)',
+        'T *IC_v = aJ;', # IC @ v (6x1 for each joint)',
+        'T *crm_S = crm_v;' # Motion cross product of S (6x6 for each joint),
+        'T *crf_S = crf_v;', # Force cross product of S (6x6 for each joint)',
+        'T *IC_S = IC_v;' # IC @ S (6x1 for each joint)',
+        'T *crm_psid = crf_v + 36*NUM_JOINTS;', # Motion cross product of psid (6x6 for each joint)',
+        'T *crf_psid = crm_psid + 36*NUM_JOINTS;', # Force cross product of psid (6x6 for each joint)',
+        'T *IC_psid = crf_psid + 36*NUM_JOINTS;', # IC @ psid (6x6 for each joint)',
+        'T *icrf_f = IC_psid + 6*NUM_JOINTS;', # icrf(f) (6x6 for each joint)',
+        'T *psid_Sd = v;', # psid + Sd (6x1 for each joint)',
+        'T *ICT_S = f;', # IC @ S (6x1 for each joint)',
+
+        '\n\n',
+        '// Main Temporary Tensors For Backward Pass',
+        'T *T1 = IC_S;', # Temporary for IC @ S (6x1 for each joint)',
+        'T *T2 = a_world + 6;', # Temporary for -BC.T @ S (6x1 for each joint)',
+        'T *T3 = T2 + 6*NUM_JOINTS;', # Temporary matrix (6x1 for each joint)',
+        'T *T4 = T3 + 6*NUM_JOINTS;', # Temporary matrix (6x1 for each joint)',
+        'T *D1 = icrf_f;', # Temporary D1 tensor (6x6 for each joint)',
+        'T *D2 = D1 + 36*NUM_JOINTS;', # Temporary D2 tensor (6x6 for each joint)',
+        'T *D3 = B_IC_S;', # Temporary D3 tensor - same as B(IC, S) (6x6 for each joint)',
+        'T *D4 = D2 + 36*NUM_JOINTS;', # Temporary D4 tensor (6x6 for each joint)',
+        'T *t = D4 + 36*NUM_JOINTS;', # Temporary outer product tensor for t1-t9 (6x6 for each joint)',
+
+        '\n\n',
+        '// Final Tensors for Output',
+        'T *d2tau_dq2 = s_idsva_so;' # Second positional derivative of the joint torques (NJxNJXNJ)',
+        'T *d2tau_dqd2 = d2tau_dq2+ NUM_JOINTS*NUM_JOINTS*NUM_JOINTS;', # Second velocity derivative of the joint torques (NJxNJXNJ)',
+        'T *d2tau_cross = d2tau_dqd2 + NUM_JOINTS*NUM_JOINTS*NUM_JOINTS;', # Cross position/velocity derivative of the joint torques (NJxNJXNJ)',
+        'T *dM_dq = d2tau_cross + NUM_JOINTS*NUM_JOINTS*NUM_JOINTS;', # Positional Derivative of the mass matrix (NJxNJXNJ)',
     ]
-    # TODO add #define for Xmat size & other consts
+    
     self.gen_add_code_lines(vars)
 
 
@@ -240,7 +281,7 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
     
-    # Compute psidd = crm(a[parent])@S + crm(v[parent])@psid
+    # Compute psidd = crm(a[parent])@S + crm(v[parent])@psid & IC_v
     self.gen_add_code_line("\n\n")
     self.gen_add_code_line('// Compute psidd = crm(a[parent])@S + crm(v[:,i])@psid[:,i] & IC @ v (for BC) in parallel')
     self.gen_add_parallel_loop('i','2*6*NUM_JOINTS',use_thread_group)
@@ -255,7 +296,7 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_sync(use_thread_group)
 
     # Begin BC Computation
-    # First Compute crm(v) & crf(v), IC @ v
+    # First Compute crm(v) & crf(v)
     self.gen_add_code_line("\n\n")
     self.gen_add_code_line('// Need crm(v), crf(v) for BC computation')
     self.gen_add_parallel_loop('i','2*36*NUM_JOINTS',use_thread_group)
@@ -292,8 +333,125 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
 
+    # Forward Pass Completed
+    self.gen_add_code_line("\n\n")
+    self.gen_add_code_line('// Forward Pass Completed')
+    self.gen_add_code_line('// Now compute the backward pass')
+
+    # Compute IC[parent] += IC[i], BC[parent] += BC[i], f[parent] += f[i]
+    self.gen_add_code_line("\n\n")
+    self.gen_add_code_line('// Compute IC[parent] += IC[i], BC[parent] += BC[i], f[parent] += f[i]')
+    self.gen_add_code_line('#pragma unroll')
+    self.gen_add_code_line('for (int jid = NUM_JOINTS-1; jid > 0; --jid) {', 1)
+    self.gen_add_parallel_loop('i','36*2 + 6',use_thread_group)
+    self.gen_add_code_line(f'if (i < 36) IC[{parent_ind_cpp}*36 + i] += IC[jid*36 + i];')
+    self.gen_add_code_line(f'else if (i < 36*2) BC[{parent_ind_cpp}*36 + i - 36] += BC[jid*36 + i - 36];')
+    self.gen_add_code_line(f'else f[{parent_ind_cpp}*6 + i - 36*2] += f[jid*6 + i - 36*2];')
+    self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
+    self.gen_add_end_control_flow()
+
+    # Begin B(IC, S) & B(IC, psid) computation
+    # First compute crm(S), crf(S), IC @ S && crm(psid), crf(psid), IC @ psid, icrf(f), psid+Sd
+    self.gen_add_code_line("\n\n")
+    self.gen_add_code_line('// Need crm(S), crf(S), IC@S, crm(psid), crf(psid), IC@psid for B computations & icrf(f), psid+Sd for T3,T4')
+    self.gen_add_parallel_loop('i','5*36*NUM_JOINTS + 3*6*NUM_JOINTS',use_thread_group)
+    self.gen_add_code_line('int jid = (i / 36) % NUM_JOINTS;')
+    self.gen_add_code_line('int jidMatmul = (i / 6) % NUM_JOINTS;')
+    self.gen_add_code_line('int col = (i / 6) % 6;')
+    self.gen_add_code_line('int row = i % 6;')
+    self.gen_add_code_line('if (i < 36*NUM_JOINTS) crm_S[i] = crm<T>(i % 36, &S[jid*6]);')
+    self.gen_add_code_line('else if (i < 2*36*NUM_JOINTS) crf_S[(jid*36) + row*6 + col] = -crm<T>(i % 36, &S[jid*6]); // crf is negative tranpose of crm')
+    self.gen_add_code_line('else if (i < 3*36*NUM_JOINTS) crm_psid[jid*36 + col*6 + row] = crm<T>(i % 36, &psid[jid*6]);')
+    self.gen_add_code_line('else if (i < 4*36*NUM_JOINTS) crf_psid[(jid*36) + row*6 + col] = -crm<T>(i % 36, &psid[jid*6]); // crf is negative tranpose of crm')
+    self.gen_add_code_line('else if (i < 5*36*NUM_JOINTS) icrf_f[i - 4*36*NUM_JOINTS] = icrf<T>(i % 36, &f[jid*6]);')
+    self.gen_add_code_line('else if (i < 5*36*NUM_JOINTS + 6*NUM_JOINTS) IC_S[i - 5*36*NUM_JOINTS] = dot_prod<T, 6, 6, 1>(&IC[row + jidMatmul*36], &S[jidMatmul*6]);')
+    self.gen_add_code_line('else if (i < 5*36*NUM_JOINTS + 2*6*NUM_JOINTS) psid_Sd[i - 5*36*NUM_JOINTS - 6*NUM_JOINTS] = psid[i - 5*36*NUM_JOINTS - 6*NUM_JOINTS] + Sd[i - 5*36*NUM_JOINTS - 6*NUM_JOINTS];')
+    self.gen_add_code_line('else IC_psid[i - 5*36*NUM_JOINTS - 2*6*NUM_JOINTS] = dot_prod<T, 6, 6, 1>(&IC[row + jidMatmul*36], &psid[jidMatmul*6]);')
+    self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
+
+    # Finish B_IC_S, B_IC_psid
+    self.gen_add_code_line('\n\n')
+    self.gen_add_code_line('// Finish B_IC_S, B_IC_psid')
+    self.gen_add_code_line('// B_IC_S = crf(S) @ IC + icrf(IC @ S) - IC @ crm(S)')
+    self.gen_add_code_line('// B_IC_psid = crf(psid) @ IC + icrf(IC @ psid) - IC @ crm(psid)')
+    self.gen_add_parallel_loop('i','2*36*NUM_JOINTS',use_thread_group)
+    self.gen_add_code_line('int jid = (i / 36) % NUM_JOINTS;')
+    self.gen_add_code_line('int row = i % 6;')
+    self.gen_add_code_line('int col = (i / 6) % 6;')
+    self.gen_add_code_line('if (i < 36*NUM_JOINTS) {', True)
+    self.gen_add_code_line('B_IC_S[i] = dot_prod<T, 6, 6, 1>(&crf_S[jid*36 + row], &IC[jid*36 + col*6]) + ')
+    self.gen_add_code_line('            icrf<T>(i % 36, &IC_S[jid*6]) -') 
+    self.gen_add_code_line('            dot_prod<T, 6, 6, 1>(&IC[jid*36 + row], &crm_S[jid*36 + col*6]);')
+    self.gen_add_end_control_flow()
+    self.gen_add_code_line('else {', True)
+    self.gen_add_code_line('B_IC_psid[i - 36*NUM_JOINTS] = dot_prod<T, 6, 6, 1>(&crf_psid[jid*36 + row], &IC[jid*36 + col*6]) + ')
+    self.gen_add_code_line('                                icrf<T>(i % 36, &IC_psid[jid*6]) -') 
+    self.gen_add_code_line('                                dot_prod<T, 6, 6, 1>(&IC[jid*36 + row], &crm_psid[jid*36 + col*6]);')
+    self.gen_add_end_control_flow()
+    self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
+
+    # Compute T2 = -BC.T @ S & T3 = BC @ psid + IC @ psidd + icrf(f) @ S, & T4 = BC @ S + IC @ (psid + Sd), & IC.T @ S for D4
+    self.gen_add_code_line('\n\n')
+    self.gen_add_code_line('// Compute T2 = -BC.T @ S')
+    self.gen_add_code_line('// Compute T3 = BC @ psid + IC @ psidd + icrf(f) @ S')
+    self.gen_add_code_line('// Compute T4 = BC @ S + IC @ (psid + Sd)')
+    self.gen_add_code_line('// Compute IC.T @ S for D4')
+    self.gen_add_parallel_loop('i','4*6*NUM_JOINTS',use_thread_group)
+    self.gen_add_code_line('int jid = (i / 6) % NUM_JOINTS;')
+    self.gen_add_code_line('int row = i % 6;')
+    self.gen_add_code_line('if (i < 6*NUM_JOINTS) T2[i] = -dot_prod<T, 6, 1, 1>(&BC[jid*36 + row*6], &S[jid*6]);')
+    self.gen_add_code_line('else if (i < 2*6*NUM_JOINTS) {', True)
+    self.gen_add_code_line('T3[i - 6*NUM_JOINTS] = dot_prod<T, 6, 6, 1>(&BC[jid*36 + row], &psid[jid*6]) +')
+    self.gen_add_code_line('                    dot_prod<T, 6, 6, 1>(&IC[jid*36 + row], &psidd[jid*6]) +')
+    self.gen_add_code_line('                    dot_prod<T, 6, 6, 1>(&icrf_f[jid*36 + row], &S[jid*6]);')
+    self.gen_add_end_control_flow()
+    self.gen_add_code_line('else if (i < 3*6*NUM_JOINTS) {', True)
+    self.gen_add_code_line('T4[i - 2*6*NUM_JOINTS] = dot_prod<T, 6, 6, 1>(&BC[jid*36 + row], &S[jid*6]) +')
+    self.gen_add_code_line('                    dot_prod<T, 6, 6, 1>(&IC[jid*36 + row], &psid_Sd[jid*6]);')
+    self.gen_add_end_control_flow()
+    self.gen_add_code_line('else ICT_S[i - 3*6*NUM_JOINTS] = dot_prod<T, 6, 6, 1>(&IC[jid*36 + row], &S[jid*6]);')
+    self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
+
+    # Compute D1..D4
+    self.gen_add_code_line('\n\n')
+    self.gen_add_code_line('// Compute D1, D2, D4')
+    self.gen_add_parallel_loop('i','3*36*NUM_JOINTS',use_thread_group)
+    self.gen_add_code_line('int jid = (i / 36) % NUM_JOINTS;')
+    self.gen_add_code_line('int row = i % 6;')
+    self.gen_add_code_line('int col = (i / 6) % 6;')
+    self.gen_add_code_line('if (i < 36*NUM_JOINTS) {', True)
+    self.gen_add_code_line('D1[i] = dot_prod<T, 6, 6, 1>(&crf_S[jid*36 + row], &IC[jid*36 + col*6]) -')
+    self.gen_add_code_line('        dot_prod<T, 6, 6, 1>(&IC[jid*36 + row], &crm_S[jid*36 + col*6]);')
+    self.gen_add_end_control_flow()
+    self.gen_add_code_line('else if (i < 2*36*NUM_JOINTS) {', True)
+    self.gen_add_code_line('D2[i - 36*NUM_JOINTS] = B_IC_psid[i - 36*NUM_JOINTS] +')
+    self.gen_add_code_line('                        dot_prod<T, 6, 6, 1>(&crf_S[jid*36 + row], &BC[jid*36 + col*6]) -')
+    self.gen_add_code_line('                        dot_prod<T, 6, 6, 1>(&BC[jid*36 + row], &crm_S[jid*36 + col*6]);')
+    self.gen_add_end_control_flow()
+    self.gen_add_code_line('else D4[i - 2*36*NUM_JOINTS] = icrf<T>(i % 36, &ICT_S[jid*6]);')
+    self.gen_add_end_control_flow()
+    self.gen_add_sync(use_thread_group)
     
+    
+    # Compute t1
+    # self.gen_add_code_line('\n\n')
+    # self.gen_add_code_line('// Compute t1 = outer(S[j], psid[ancestor])')
+    # self.gen_add_code_line('int jids[] = {}; // Joint for each matrix of t1') # TODO fill with joint indexes of each matrix
+    # self.gen_add_code_line('int ancestors[] = {}; // Ancestor for each matrix of t1') # TODO fill with ancestor indexes of each matrix
+    # self.gen_add_parallel_loop('i',f'{sum([i for i in range(NV+1)])}*36',use_thread_group)
+    # self.gen_add_code_line('int jid = jids[i / 36];')
+    # self.gen_add_code_line('int ancestor = ancestors[i / 36];')
+    # self.gen_add_code_line('t1_outer[mat*36] = outerProduct<T>(&S[jid*6], &psid[ancestor*6] 6, 6, index%36);')
+
+
+
     self.gen_add_end_function()
+
+
         
 
 
