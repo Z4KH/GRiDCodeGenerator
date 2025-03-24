@@ -489,10 +489,10 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_code_line(f'int ancestor_j = ancestors_j_compute[index];')
     self.gen_add_code_line(f'int st_j = st[index];')
     self.gen_add_code_line(f'int t_idx = ((jid*(jid+1)/2) + ancestor_j)*36;')
-    self.gen_add_code_line(f'if (i < {len(jids)}) d2tau_cross[st_j*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + jid] = -dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
+    self.gen_add_code_line(f'if (i < {len(jids)}) d2tau_cross[st_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + ancestor_j] = -dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
     self.gen_add_code_line(f'else if (i < {len(jids)*2} && jid != st_j) d2tau_dq2[jid*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + ancestor_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D2[st_j*36]);')
     self.gen_add_code_line(f'else if (i < {len(jids)*3} && jid != st_j) d2tau_dq2[jid*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + st_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D2[st_j*36]);')
-    self.gen_add_code_line(f'else if (jid != st_j) d2tau_cross[jid*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + st_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
+    self.gen_add_code_line(f'else if (jid != st_j) d2tau_cross[jid*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + ancestor_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
 
@@ -529,7 +529,7 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_code_line(f'else if (i < {2*len(jids)} && jid != st_j) d2tau_dqd2[jid*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + ancestor_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
     self.gen_add_code_line(f'else if (i < {3*len(jids)} && ancestor_j < jid) d2tau_dqd2[st_j*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + jid] = -dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
     self.gen_add_code_line(f'else if (i < {4*len(jids)} && jid != st_j) d2tau_dqd2[jid*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + st_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
-    self.gen_add_code_line(f'else if (i >= {4*len(jids)} && jid != st_j) d2tau_cross[jid*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + ancestor_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D2[st_j*36]);')
+    self.gen_add_code_line(f'else if (i >= {4*len(jids)} && jid != st_j) d2tau_cross[jid*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + st_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D2[st_j*36]);')
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
 
@@ -618,7 +618,7 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_code_line(f'int ancestor_j = ancestors_j_compute[index];')
     self.gen_add_code_line(f'int st_j = st[index];')
     self.gen_add_code_line(f'int t_idx = ((jid*(jid+1)/2) + ancestor_j)*36;')
-    self.gen_add_code_line(f'if (st_j != jid) d2tau_cross[jid*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + ancestor_j] += dot_prod<T, 36, 1, 1>(&t[t_idx], &D1[st_j*36]);')
+    self.gen_add_code_line(f'if (st_j != jid) d2tau_cross[jid*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + st_j] += dot_prod<T, 36, 1, 1>(&t[t_idx], &D1[st_j*36]);')
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
 
@@ -649,9 +649,9 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_code_line(f'int st_j = st[index];')
     self.gen_add_code_line(f'int t_idx = ((jid*(jid+1)/2) + ancestor_j)*36;')
     self.gen_add_code_line('if (ancestor_j < jid) {', True)
-    self.gen_add_code_line(f'if (i < {len(jids)}) d2tau_cross[st_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + ancestor_j] = -dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
+    self.gen_add_code_line(f'if (i < {len(jids)}) d2tau_cross[st_j*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + jid] = -dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
     self.gen_add_code_line(f'else if (i < {2*len(jids)}) d2tau_dq2[ancestor_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + st_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D2[st_j*36]);')
-    self.gen_add_code_line('else d2tau_cross[ancestor_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + st_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
+    self.gen_add_code_line('else d2tau_cross[ancestor_j*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + jid] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
     self.gen_add_end_control_flow()
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
@@ -720,7 +720,7 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_code_line('if (st_j != jid) {', True)
     self.gen_add_code_line(f'if (i < {3*len(jids)}) d2tau_dqd2[ancestor_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + st_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
     self.gen_add_code_line(f'else if (i < {4*len(jids)}) d2tau_dqd2[ancestor_j*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + jid] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
-    self.gen_add_code_line(f'else if (i < {5*len(jids)}) d2tau_cross[ancestor_j*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + jid] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D2[st_j*36]);')
+    self.gen_add_code_line(f'else if (i < {5*len(jids)}) d2tau_cross[ancestor_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + st_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D2[st_j*36]);')
     self.gen_add_end_control_flow()
     self.gen_add_end_control_flow()
     self.gen_add_code_line(f'if (jid != st_j && i < {6*len(jids)}) dM_dq[ancestor_j*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + jid] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D1[st_j*36]);')
@@ -753,7 +753,7 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_code_line(f'int ancestor_j = ancestors_j_compute[index];')
     self.gen_add_code_line(f'int st_j = st[index];')
     self.gen_add_code_line(f'int t_idx = ((jid*(jid+1)/2) + ancestor_j)*36;')
-    self.gen_add_code_line(f'if (i < {len(jids)} && ancestor_j < jid && st_j != jid) d2tau_cross[ancestor_j*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + jid] += dot_prod<T, 36, 1, 1>(&t[t_idx], &D1[st_j*36]);')
+    self.gen_add_code_line(f'if (i < {len(jids)} && ancestor_j < jid && st_j != jid) d2tau_cross[ancestor_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + st_j] += dot_prod<T, 36, 1, 1>(&t[t_idx], &D1[st_j*36]);')
     self.gen_add_code_line(f'else if (ancestor_j < jid & st_j != jid) d2tau_dq2[ancestor_j*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + jid] = d2tau_dq2[ancestor_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + st_j];')
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
@@ -800,10 +800,10 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_code_line(f'if (i < {len(jids)}) d2tau_dq2[st_j*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + jid] += -dot_prod<T, 6, 1, 1>(&p1[p_idx], &T2[st_j*6]) + dot_prod<T, 6, 1, 1>(&p2[p_idx], &T1[st_j*6]);')
     self.gen_add_code_line('else if (ancestor_j < jid) {', True)
     self.gen_add_code_line(f'if (i < {2*len(jids)}) d2tau_dq2[st_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + ancestor_j] += -dot_prod<T, 6, 1, 1>(&p1[p_idx], &T2[st_j*6]) + dot_prod<T, 6, 1, 1>(&p2[p_idx], &T1[st_j*6]);')
-    self.gen_add_code_line(f'else if (i < {3*len(jids)}) d2tau_cross[st_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + ancestor_j] += -dot_prod<T, 6, 1, 1>(&p3[p_idx], &T2[st_j*6]) + dot_prod<T, 6, 1, 1>(&p4[p_idx], &T1[st_j*6]);')
+    self.gen_add_code_line(f'else if (i < {3*len(jids)}) d2tau_cross[st_j*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + jid] += -dot_prod<T, 6, 1, 1>(&p3[p_idx], &T2[st_j*6]) + dot_prod<T, 6, 1, 1>(&p4[p_idx], &T1[st_j*6]);')
     self.gen_add_code_line(f'else if (i < {4*len(jids)}) d2tau_dq2[ancestor_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + st_j] -= dot_prod<T, 6, 1, 1>(&p5[p_idx], &T3[st_j*6]);')
     self.gen_add_code_line(f'else if (i < {5*len(jids)} && st_j != jid) d2tau_dq2[ancestor_j*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + jid] -= dot_prod<T, 6, 1, 1>(&p5[p_idx], &T3[st_j*6]);')
-    self.gen_add_code_line(f'else if (i >= {5*len(jids)}) d2tau_cross[ancestor_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + st_j] -= dot_prod<T, 6, 1, 1>(&p5[p_idx], &T4[st_j*6]);')
+    self.gen_add_code_line(f'else if (i >= {5*len(jids)}) d2tau_cross[ancestor_j*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + jid] -= dot_prod<T, 6, 1, 1>(&p5[p_idx], &T4[st_j*6]);')
     self.gen_add_end_control_flow()
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
@@ -953,7 +953,7 @@ def gen_idsva_so_host(self, mode = 0):
     # then generate the code
     self.gen_add_func_doc("Compute IDSVA-SO (Inverse Dynamics - Spatial Vector Algebra - Second Order)",\
                           func_notes,func_params,None)
-    self.gen_add_code_line("template <typename T, bool USE_QDD_FLAG = false, bool USE_COMPRESSED_MEM = false>")
+    self.gen_add_code_line("template <typename T>")
     self.gen_add_code_line("__host__")
     self.gen_add_code_line(func_def_start)
     self.gen_add_code_line(func_def_end, True)
@@ -963,35 +963,16 @@ def gen_idsva_so_host(self, mode = 0):
     if single_call_timing:
         func_call_start = func_call_start.replace("kernel<T>","kernel_single_timing<T>")
 
-# TODO
+    self.gen_add_code_line("int stride_q_qd = 3*NUM_JOINTS;")
     if not compute_only:
         # start code with memory transfer
         self.gen_add_code_lines(["// start code with memory transfer", \
-                                 "int stride_q_qd;", \
-                                 "if (USE_COMPRESSED_MEM) {stride_q_qd = 2*NUM_JOINTS; " + \
-                                    "gpuErrchk(cudaMemcpyAsync(hd_data->d_q_qd,hd_data->h_q_qd,stride_q_qd*" + \
-                                    ("num_timesteps*" if not single_call_timing else "") + "sizeof(T),cudaMemcpyHostToDevice,streams[0]));}", \
-                                 "else {stride_q_qd = 3*NUM_JOINTS; " + \
-                                    "gpuErrchk(cudaMemcpyAsync(hd_data->d_q_qd_u,hd_data->h_q_qd_u,stride_q_qd*" + \
-                                    ("num_timesteps*" if not single_call_timing else "") + "sizeof(T),cudaMemcpyHostToDevice,streams[0]));}", \
-                                 "if (USE_QDD_FLAG) {gpuErrchk(cudaMemcpyAsync(hd_data->d_qdd,hd_data->h_qdd,NUM_JOINTS*" + \
-                                    ("num_timesteps*" if not single_call_timing else "") + "sizeof(T),cudaMemcpyHostToDevice,streams[1]));}", \
+                                "gpuErrchk(cudaMemcpyAsync(hd_data->d_q_qd_u,hd_data->h_q_qd_u,stride_q_qd*" + \
+                                ("num_timesteps*" if not single_call_timing else "") + "sizeof(T),cudaMemcpyHostToDevice,streams[0]));", \
                                  "gpuErrchk(cudaDeviceSynchronize());"])
-    else:
-        self.gen_add_code_line("int stride_q_qd = USE_COMPRESSED_MEM ? 2*NUM_JOINTS: 3*NUM_JOINTS;")
-    # then compute but adjust for compressed mem and qdd usage
+    # TODO then compute but adjust for compressed mem and qdd usage
     self.gen_add_code_line("// then call the kernel")
     # TODO - qdd=0 optimization
-    # func_call = func_call_start + func_call_end
-    # func_call_with_qdd = func_call_start + "hd_data->d_qdd, " + func_call_end
-    # # add in compressed mem adjusts
-    # func_call_mem_adjust = "    if (USE_COMPRESSED_MEM) {" + func_call + "}"
-    # func_call_mem_adjust2 = "    else                    {" + func_call.replace("hd_data->d_q_qd","hd_data->d_q_qd_u") + "}"
-    # func_call_with_qdd_mem_adjust = "    if (USE_COMPRESSED_MEM) {" + func_call_with_qdd + "}"
-    # func_call_with_qdd_mem_adjust2 = "    else                    {" + func_call_with_qdd.replace("hd_data->d_q_qd","hd_data->d_q_qd_u") + "}"
-    # compule into a set of code
-    # func_call_code = ["if (USE_QDD_FLAG) {", func_call_with_qdd_mem_adjust, func_call_with_qdd_mem_adjust2, "}", \
-    #                   "else {", func_call_mem_adjust, func_call_mem_adjust2, "}", "gpuErrchk(cudaDeviceSynchronize());"]
     
     func_call_code = [f'{func_call_start}{func_call_end}']
     # wrap function call in timing (if needed)

@@ -29,7 +29,7 @@ class GRiDCodeGenerator:
                             gen_inverse_dynamics_gradient_kernel, gen_inverse_dynamics_gradient_host, gen_inverse_dynamics_gradient, \
                             gen_forward_dynamics_gradient_inner_temp_mem_size, gen_forward_dynamics_gradient_kernel_max_temp_mem_size, \
                             gen_forward_dynamics_gradient_inner_python, gen_forward_dynamics_gradient_device, gen_forward_dynamics_gradient_kernel, \
-                            gen_forward_dynamics_gradient_host, gen_forward_dynamics_gradient, \
+                            gen_forward_dynamics_gradient_host, gen_forward_dynamics_gradient, gen_forward_dynamics_gradient_device_function_call, \
                             gen_end_effector_positions_inner_temp_mem_size, gen_end_effector_positions_inner_function_call, gen_end_effector_positions_inner, \
                             gen_end_effector_positions_device_temp_mem_size, gen_end_effector_positions_device, gen_end_effector_positions_kernel, \
                             gen_end_effector_positions_host, gen_end_effector_positions_gradient_inner_temp_mem_size, gen_end_effector_positions_gradient_inner_function_call, \
@@ -40,7 +40,9 @@ class GRiDCodeGenerator:
                             gen_crba, gen_crba_inner_temp_mem_size, gen_crba_inner_function_call, gen_crba_inner, gen_crba_device_temp_mem_size, \
                             gen_crba_device, gen_crba_kernel, gen_crba_host, \
                             gen_idsva_so_inner_temp_mem_size, gen_idsva_so_inner_function_call, gen_idsva_so_inner, gen_idsva_so_device_temp_mem_size, \
-                            gen_idsva_so_device, gen_idsva_so_kernel, gen_idsva_so_host, gen_idsva_so
+                            gen_idsva_so_device, gen_idsva_so_kernel, gen_idsva_so_host, gen_idsva_so, \
+                            gen_fdsva_so, gen_fdsva_so_inner_temp_mem_size, gen_fdsva_so_inner_function_call, gen_fdsva_so_inner, gen_fdsva_so_device_temp_mem_size, \
+                            gen_fdsva_so_device, gen_fdsva_so_kernel, gen_fdsva_so_host 
 
     # finally import the test code
     from ._test import test_rnea_fpass, test_rnea_bpass, test_rnea, test_minv_bpass, test_minv_fpass, test_densify_Minv, test_minv, test_rnea_grad_inner, \
@@ -101,7 +103,8 @@ class GRiDCodeGenerator:
                                  "const int FD_DU_MAX_SHARED_MEM_COUNT = " + str(int(self.gen_forward_dynamics_gradient_kernel_max_temp_mem_size()) + XI_size) + ";", \
                                  "const int EE_POS_DYNAMIC_SHARED_MEM_COUNT = " + str(int(self.gen_end_effector_positions_inner_temp_mem_size()) + XHom_size) + ";", \
                                  "const int DEE_POS_DYNAMIC_SHARED_MEM_COUNT = " + str(int(self.gen_end_effector_positions_gradient_inner_temp_mem_size()) + 2*XHom_size) + ";", \
-                                 f"const int IDSVA_SO_SHARED_MEM_COUNT = {self.gen_idsva_so_inner_temp_mem_size()} + {XI_size};", \
+                                 f"const int IDSVA_SO_SHARED_MEM_COUNT = {self.gen_idsva_so_inner_temp_mem_size()};", \
+                                 f'const int FDSVA_SO_SHARED_MEM_COUNT = {self.gen_fdsva_so_inner_temp_mem_size()};', \
                                  "const int SUGGESTED_THREADS = " + str(min(suggested_threads, 512)) + ";"]) # max of 512 to avoid exceeding available registers
         # then the structs
         # first add the struct
@@ -130,8 +133,10 @@ class GRiDCodeGenerator:
                                  "    T *d_df_du;", \
                                  "    T *d_eePos;", \
                                  "    T *d_deePos;", \
-                                 # idsva_so - d2tau_dq, d2tau_dqd, d2tau_cross, dM_dq
+                                 # idsva_so - d2tau_dq2, d2tau_dqd2, d2tau_cross, dM_dq
                                  "    T *d_idsva_so;", \
+                                 # fdsva_so - d2fd_dq2, d2fd_cross, d2fd_dqd2, d2fd_dtaudq
+                                 "    T *d_df2;", \
                                  "    // CPU OUTPUTS", \
                                  "    T *h_c;", \
                                  "    T *h_Minv;", \
@@ -141,8 +146,10 @@ class GRiDCodeGenerator:
                                  "    T *h_df_du;", \
                                  "    T *h_eePos;", \
                                  "    T *h_deePos;", \
-                                 # idsva_so - d2tau_dq, d2tau_dqd, d2tau_cross, dM_dq
+                                 # idsva_so - d2tau_dq2, d2tau_dqd2, d2tau_cross, dM_dq
                                  "    T *h_idsva_so;", \
+                                 # fdsva_so - d2fd_dq2, d2fd_cross, d2fd_dqd2, d2fd_dtaudq
+                                 "    T *h_df2;", \
                                  "};"])
 
     def gen_init_gridData(self):
@@ -166,6 +173,8 @@ class GRiDCodeGenerator:
                       "gpuErrchk(cudaMalloc((void**)&hd_data->d_deePos, 6*NUM_EES*NUM_JOINTS*NUM_TIMESTEPS*sizeof(T)));", \
                       # idsva_so - d2tau_dq, d2tau_dqd, d2tau_cross, dM_dq
                       "gpuErrchk(cudaMalloc((void**)&hd_data->d_idsva_so, 4*NUM_JOINTS*NUM_JOINTS*NUM_JOINTS*NUM_TIMESTEPS*sizeof(T)));", \
+                      # fdsva_so - d2fd_dq2, d2fd_cross, d2fd_dqd2, d2fd_dtaudq
+                      "gpuErrchk(cudaMalloc((void**)&hd_data->d_df2, 4*NUM_JOINTS*NUM_JOINTS*NUM_JOINTS*NUM_TIMESTEPS*sizeof(T)));", \
                       "// and the CPU", \
                       "hd_data->h_c = (T *)malloc(NUM_JOINTS*NUM_TIMESTEPS*sizeof(T));", \
                       "hd_data->h_Minv = (T *)malloc(NUM_JOINTS*NUM_JOINTS*NUM_TIMESTEPS*sizeof(T));", \
@@ -177,6 +186,8 @@ class GRiDCodeGenerator:
                       "hd_data->h_deePos = (T *)malloc(6*NUM_EES*NUM_JOINTS*NUM_TIMESTEPS*sizeof(T));", \
                       # idsva_so - d2tau_dq, d2tau_dqd, d2tau_cross, dM_dq
                       "hd_data->h_idsva_so = (T *)malloc(4*NUM_JOINTS*NUM_JOINTS*NUM_JOINTS*NUM_TIMESTEPS*sizeof(T));", \
+                      # fdsva_so - d2fd_dq2, d2fd_cross, d2fd_dqd2, d2fd_dtaudq
+                      "hd_data->h_df2 = (T *)malloc(4*NUM_JOINTS*NUM_JOINTS*NUM_JOINTS*NUM_TIMESTEPS*sizeof(T));", \
                       "return hd_data;"]
         # generate as templated or not function
         self.gen_add_func_doc("Allocated device and host memory for all computations",
@@ -242,6 +253,8 @@ class GRiDCodeGenerator:
                                  "gpuErrchk(cudaFree(hd_data->d_eePos)); gpuErrchk(cudaFree(hd_data->d_deePos));", \
                                 # idsva_so - d2tau_dq, d2tau_dqd, d2tau_cross, dM_dq
                                  "gpuErrchk(cudaFree(hd_data->d_idsva_so));", \
+                                 # fdsva_so - d2fd_dq2, d2fd_cross, d2fd_dqd2, d2fd_dtaudq
+                                    "gpuErrchk(cudaFree(hd_data->d_df2));", \
                                  "free(hd_data->h_idsva_so);", \
                                  "free(hd_data->h_q_qd_u); free(hd_data->h_q_qd); free(hd_data->h_q);", \
                                  "free(hd_data->h_c); free(hd_data->h_Minv); free(hd_data->h_qdd);", \
@@ -340,14 +353,14 @@ class GRiDCodeGenerator:
             "    __global__ end_effector_positions_gradient_kernel<T>(T *d_deePos, const T *d_q, const robotModel<T> *d_robotModel, const int NUM_TIMESTEPS)", \
             "    __host__   end_effector_positions_gradient<T,USE_COMPRESSED_MEM=false>(gridData<T> *hd_data, const robotModel<T> *d_robotModel, const int num_timesteps, const dim3 block_dimms, const dim3 thread_dimms, cudaStream_t *streams)", \
             "",\
-            "    __device__ idsva_so_inner<T>(T *s_c,  T *s_vaf, const T *s_q, const T *s_qd, const T *s_qdd, T *s_XImats, int *s_topology_helpers, T *s_temp, const T gravity)",\
-            "    __device__ idsva_so_inner<T>(T *s_c,  T *s_vaf, const T *s_q, const T *s_qd, T *s_XImats, int *s_topology_helpers, T *s_temp, const T gravity)",\
-            "    __device__ idsva_so_device<T>(T *s_c, const T *s_q, const T *s_qd, const robotModel<T> *d_robotModel, const T gravity)", \
-            "    __device__ idsva_so_device<T>(T *s_c, const T *s_q, const T *s_qd, const T *s_qdd, const robotModel<T> *d_robotModel, const T gravity)", \
-            "    __global__ idsva_so_kernel<T>(T *d_c, const T *d_q_qd, const robotModel<T> *d_robotModel, const T gravity, const int NUM_TIMESTEPS)", \
-            "    __global__ idsva_so_kernel<T>(T *d_c, const T *d_q_qd, const T *d_qdd, const robotModel<T> *d_robotModel, const T gravity, const int NUM_TIMESTEPS)", \
-            "    __host__   idsva_so_host<T,USE_QDD_FLAG=false,USE_COMPRESSED_MEM=false>(gridData<T> *hd_data, const robotModel<T> *d_robotModel, const T gravity, const int num_timesteps, const dim3 block_dimms, const dim3 thread_dimms, cudaStream_t *streams)", \
+            "    __device__ idsva_so_inner(T *s_idsva_so, const T *s_q, const T *s_qd, T *s_qdd, T *s_XImats, T *s_mem, const T gravity)",\
+            "    __global__ idsva_so_kernel(T *d_idsva_so, const T *d_q_qd_u, const int stride_q_qd_u, const robotModel<T> *d_robotModel, const T gravity, const int NUM_TIMESTEPS)", \
+            "    __host__   idsva_so_host<T>(gridData<T> *hd_data, const robotModel<T> *d_robotModel, const T gravity, const int num_timesteps, const dim3 block_dimms, const dim3 thread_dimms, cudaStream_t *streams)", \
             "",\
+            "    __device__ fdsva_so_inner(T *s_df2, T *s_idsva_so, T *s_Minv, T *s_df_du, T *s_q, T *s_qd, const T *s_qdd, const T *s_tau, T *s_XImats, T *s_temp, const T gravity)",\
+            "    __global__ fdsva_so_kernel(T *d_df2, const T *d_q_qd_qdd_tau, const int stride_q_qd_qdd, const robotModel<T> *d_robotModel, const T gravity, const int NUM_TIMESTEPS)", \
+            "    __host__   fdsva_so<T>(gridData<T> *hd_data, const robotModel<T> *d_robotModel, const T gravity, const int num_timesteps, const dim3 block_dimms, const dim3 thread_dimms, cudaStream_t *streams)", \
+            
             "","Suggested Type T is float",\
             "","Additional helper functions and ALGORITHM_inner functions which take in __shared__ memory temp variables exist -- see function descriptions in the file",\
             "","By default device and kernels need to be launched with dynamic shared mem of size <FUNC_CODE>_DYNAMIC_SHARED_MEM_COUNT where <FUNC_CODE> = [ID, MINV, FD, ID_DU, FD_DU]"]
@@ -395,6 +408,7 @@ class GRiDCodeGenerator:
             self.gen_crba(use_thread_group)
             if self.robot.is_serial_chain():
                 self.gen_idsva_so(use_thread_group)
+                self.gen_fdsva_so(use_thread_group)
             else: print('idsva-so is still under development for branching robots')
         # then finally the master init and close the namespace
         self.gen_init_close_grid()
