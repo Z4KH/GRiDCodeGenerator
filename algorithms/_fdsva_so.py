@@ -25,105 +25,57 @@ def gen_fdsva_so_inner(self, use_thread_group = False):
     self.gen_add_code_line("__device__")
     self.gen_add_code_line(func_def, True)
 
-    n = self.robot.get_num_pos()
-
-    #declare s_d2tau_dq, s_d2tau_dqd, s_d2tau_cross, s_dm_dq from idsvaso
-    self.gen_add_code_line("T *s_d2tau_dq = &s_idsva_so[" + str(n*n*n*0) + "];" )
-    self.gen_add_code_line("T *s_d2tau_dqd = &s_idsva_so[" + str(n*n*n*1) + "];" )
-    self.gen_add_code_line("T *s_d2tau_cross = &s_idsva_so[" + str(n*n*n*2) + "];" )
-    self.gen_add_code_line("T *s_dm_dq = &s_idsva_so[" + str(n*n*n*3) + "];" )
-    #declare df_dq, df_dqd, fd_dtau from df_du 
-    self.gen_add_code_line("T *s_df_dq = s_df_du; T *s_df_dqd = &s_df_du[" + str(n*n) + "];")
-    
-    self.gen_add_sync(use_thread_group)
-    
-    self.gen_add_code_line("T *dM_dqxfd_dq = s_temp;")
-
-    self.gen_add_parallel_loop("ind",str(n*n*n),use_thread_group)
-    #fill in mat mult of dM_dq + df_dq
-    self.gen_add_code_line("int page = ind / " + str(n*n) + ";")
-    self.gen_add_code_line("int row = ind % " + str(n) + ";")
-    self.gen_add_code_line("int col = ind % " + str(n*n) + " / " + str(n) + ";")
-    # self.gen_add_code_line("dM_dqxfd_dq[" + str(i*n*n) + "+ ind] = dot_prod<T,7,7,1>(&s_dm_dq" + str(i) + "[row], &s_df_dq[" + str(n) + "*row + col]);")
-    self.gen_add_code_line("dM_dqxfd_dq[ind] = dot_prod<T," + str(n) + "," + str(n) + ",1>(&s_dm_dq[" + str(n*n) + "*page + row], &s_df_dq[" + str(n) + "*col]);")
-    self.gen_add_end_control_flow()
-    self.gen_add_sync(use_thread_group)
-
-    #rotation of dM_dq + df_dq
+    n = self.robot.get_num_vel()
     NV = self.robot.get_num_vel()
-    self.gen_add_code_line(f"T *rot_dM_dqxfd_dqd = &s_temp[{NV**3}];")  # Compute rotation after the original
-    
-    self.gen_add_parallel_loop("ind",str(NV**3),use_thread_group)
-    self.gen_add_code_line(f"int page = ind / {NV**2};")
-    self.gen_add_code_line(f"int row = ind % {NV};")
-    self.gen_add_code_line(f"int col = ind / {NV} % {NV};")
-    self.gen_add_code_line(f"rot_dM_dqxfd_dqd[{NV*NV}*col + row + {NV}*page] = dM_dqxfd_dq[ind];")
-    self.gen_add_end_control_flow()
-    self.gen_add_sync(use_thread_group)
 
-    self.gen_add_parallel_loop("ind",str(n*n*n),use_thread_group)
-    # #big addition step for df2_dq
-    self.gen_add_code_line("s_df2[ind] = s_d2tau_dq[ind] + dM_dqxfd_dq[ind] + rot_dM_dqxfd_dqd[ind];")
-    self.gen_add_end_control_flow()
-    self.gen_add_sync(use_thread_group)
+    self.gen_add_code_line('// Second Derivatives of Inverse Dynamics')
+    self.gen_add_code_line("T *d2tau_dqdq = &s_idsva_so[" + str(n*n*n*0) + "];" )
+    self.gen_add_code_line("T *d2tau_dvdv = &s_idsva_so[" + str(n*n*n*1) + "];" )
+    self.gen_add_code_line("T *d2tau_dvdq = &s_idsva_so[" + str(n*n*n*2) + "];" )
+    self.gen_add_code_line("T *dM_dq = &s_idsva_so[" + str(n*n*n*3) + "];" )
+    self.gen_add_code_line('\n\n')
+    self.gen_add_code_line('// First Derivatives of Forward Dynamics')
+    self.gen_add_code_line("T *s_df_dq = s_df_du; T *s_df_dqd = &s_df_du[" + str(n*n) + "];")
+    self.gen_add_code_line('\n\n')
+    self.gen_add_code_line('// Second Derivatives of Forward Dynamics')
+    self.gen_add_code_line('T *d2a_dqdq = s_df2;')
+    self.gen_add_code_line('T *d2a_dvdv = &s_df2[' + str(n*n*n) + '];')
+    self.gen_add_code_line('T *d2a_dvdq = &s_df2[' + str(2*n*n*n) + '];')
+    self.gen_add_code_line('T *d2a_dtdq = &s_df2[' + str(3*n*n*n) + '];')
+    self.gen_add_code_line('\n\n')
+    self.gen_add_code_line('// Temporary Variables')
+    self.gen_add_code_line(f'T *inner_dq = s_temp; // Inner term for d2a_dqdq (d2tau_dqdq + dM_dq*da_dq + (dM_dq*da_dq)^R)')
+    self.gen_add_code_line(f'T *inner_cross = inner_dq + {n**3}; // Inner term for d2a_dvdq (dM_dq*Minv)')
+    self.gen_add_code_line(f'T *inner_tau = inner_cross + {n**3}; // Inner term for d2a_dtdq (d2tau_dvdq + dM_dq*da_dv)')
+    self.gen_add_code_line(f'\n\n')
 
-    self.gen_add_code_line("T *dM_dqxfd_dqd = s_temp;")
-
-    self.gen_add_parallel_loop("ind",str(n*n*n),use_thread_group)
-    #fill in mat mult of dM_dq + df_dqd
-    self.gen_add_code_line("int page = ind / " + str(n*n) + ";")
-    self.gen_add_code_line("int row = ind % " + str(n) + ";")
-    self.gen_add_code_line("int col = ind % " + str(n*n) + " / " + str(n) + ";")
-    # self.gen_add_code_line("dM_dqxfd_dq[" + str(i*n*n) + "+ ind] = dot_prod<T,7,7,1>(&s_dm_dq" + str(i) + "[row], &s_df_dq[" + str(n) + "*row + col]);")
-    self.gen_add_code_line("dM_dqxfd_dqd[ind] = dot_prod<T," + str(n) + "," + str(n) + ",1>(&s_dm_dq[" + str(n*n) + "*page + row], &s_df_dqd[" + str(n) + "*col]);")
-    self.gen_add_end_control_flow()
-    self.gen_add_sync(use_thread_group)
-
-
-    self.gen_add_parallel_loop("ind",str(n*n*n),use_thread_group)
-    #big addition step for df2_dq_qd
-    self.gen_add_code_line("s_df2[" + str(n*n*n) + "+ ind] = s_d2tau_cross[ind] + dM_dqxfd_dqd[ind];")
-    #load val for df2_dqd
-    self.gen_add_code_line("s_df2[" + str(n*n*n*2) + "+ ind] = s_d2tau_dqd[ind];")
-    self.gen_add_end_control_flow()
-    self.gen_add_sync(use_thread_group)
-
-    #fill in mat mult of dM_dq + Minv
-    #fix minv 
-    for row_m in range(n):
-        for col_m in range(n):
-            if row_m > col_m:
-                self.gen_add_code_line("s_Minv["+ str(row_m + col_m*n) + "] = s_Minv["+ str(row_m*n + col_m) + "];")
-
-    self.gen_add_sync(use_thread_group)
-    
-    self.gen_add_parallel_loop("ind",str(n*n*n),use_thread_group)
-    #fill in mat mult of dM_dq + df_dqd
-    self.gen_add_code_line("int page = ind / " + str(n*n) + ";")
-    self.gen_add_code_line("int row = ind % " + str(n) + ";")
-    self.gen_add_code_line("int col = ind % " + str(n*n) + " / " + str(n) + ";")
-    # self.gen_add_code_line("dM_dqxfd_dq[" + str(i*n*n) + "+ ind] = dot_prod<T,7,7,1>(&s_dm_dq" + str(i) + "[row], &s_df_dq[" + str(n) + "*row + col]);")
-    self.gen_add_code_line("s_df2[" + str(n*n*n*3) + "+ ind] = dot_prod<T," + str(n) + "," + str(n) + ",1>(&s_dm_dq[" + str(n*n) + "*page + row], &s_Minv[" + str(n) + "*col]);")
+    # Start inner term for d2a_dqdq
+    self.gen_add_code_line('// Start inner term for d2a_dqdq & Fill out Minv')
+    self.gen_add_parallel_loop("ind",str(n**3 + n*n),use_thread_group)
+    self.gen_add_code_line(f'int i = ind / {n*n} % {n}; int j = ind / {n} % {n}; int k = ind % {n};')
+    self.gen_add_code_line(f'if (ind < {n**3}) inner_dq[ind] = dot_prod<T, {n}, 1, 1>(&dM_dq[{n*n}*i + {n}*k], &s_df_dq[{n}*j]);')
+    self.gen_add_code_line(f'else if (k > j) s_Minv[j*{n} + k] = s_Minv[k*{n} + j];')
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
     
-
-    self.gen_add_code_line("T *s_df2_temp = &s_idsva_so[0];")
-    
-
-    self.gen_add_parallel_loop("ind",str(n*n*n*4),use_thread_group)
-    #fill in mat mult of everything w minv
-    self.gen_add_code_line("int page = ind / " + str(n*n) + ";")
-    self.gen_add_code_line("int row = ind % " + str(n) + ";")
-    self.gen_add_code_line("int col = ind % " + str(n*n) + " / " + str(n) + ";")
-    self.gen_add_code_line("s_df2_temp[ind] = dot_prod<T," + str(n) + "," + str(n) + ",1>(&s_Minv[row], &s_df2[" + str(n*n) + "*page + " + str(n) + "*col]);")
+    # 3Dx2D Tensor Computation defined as iLk,Lj->ijk
+    self.gen_add_code_line('// Compute relevant inner subterms in parallel')
+    self.gen_add_parallel_loop("ind",str(3*n**3),use_thread_group)
+    self.gen_add_code_line(f'int i = ind / {n*n} % {n}; int j = ind / {n} % {n}; int k = ind % {n};')
+    self.gen_add_code_line(f'if (ind < {n**3}) inner_dq[i*{n*n} + k*{n} + j] += inner_dq[i*{n*n} + j*{n} + k] + d2tau_dqdq[ind]; // Start with dM_dq*da_dq')
+    self.gen_add_code_line(f'else if (ind < {2*n**3}) inner_cross[i*{n*n} + k*{n} + j] = dot_prod<T, {n}, 1, 1>(&dM_dq[{n*n}*i + {n}*k], &s_df_dqd[{n}*j]) + d2tau_dvdq[i*{n*n} + k*{n} + j];')
+    self.gen_add_code_line(f'else inner_tau[i*{n*n} + k*{n} + j] = dot_prod<T, {n}, 1, 1>(&dM_dq[{n*n}*i + {n}*k], &s_Minv[{n}*j]);')
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
 
-    self.gen_add_parallel_loop("ind",str(n*n*n*4),use_thread_group)
-    #mult everything by -1
-    self.gen_add_code_line("s_df2[ind] = s_df2_temp[ind];")
-    self.gen_add_code_line("s_df2[ind] *= (-1);")
+    # 2Dx3D tensor computation defined as iL,Ljk->ijk
+    self.gen_add_code_line('// Multiply by -Minv to finish algorithm')
+    self.gen_add_parallel_loop("ind",str(4*n**3),use_thread_group)
+    self.gen_add_code_line(f'int i = ind / {n*n} % {n}; int j = ind / {n} % {n}; int k = ind % {n};')
+    self.gen_add_code_line(f'if (ind < {n**3}) d2a_dqdq[i*{n*n} + j + k*{n}] = -dot_prod<T, {n}, {n}, {n*n}>(&s_Minv[i], &inner_dq[j + k*{n}]);')
+    self.gen_add_code_line(f'else if (ind < {2*n**3}) d2a_dvdq[i*{n*n} + j + k*{n}] = -dot_prod<T, {n}, {n}, {n*n}>(&s_Minv[i], &inner_cross[j + k*{n}]);')
+    self.gen_add_code_line(f'else if (ind < {3*n**3}) d2a_dvdv[i*{n*n} + j + k*{n}] = -dot_prod<T, {n}, {n}, {n*n}>(&s_Minv[i], &d2tau_dvdv[j + k*{n}]);')
+    self.gen_add_code_line(f'else d2a_dtdq[i*{n*n} + j + k*{n}] = -dot_prod<T, {n}, {n}, {n*n}>(&s_Minv[i], &inner_tau[j + k*{n}]);')
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
 

@@ -133,9 +133,9 @@ class GRiDCodeGenerator:
                                  "    T *d_df_du;", \
                                  "    T *d_eePos;", \
                                  "    T *d_deePos;", \
-                                 # idsva_so - d2tau_dq2, d2tau_dqd2, d2tau_cross, dM_dq
+                                 # idsva_so - d2tau_dq2, d2tau_dqd2, d2tau_dvdq, dM_dq
                                  "    T *d_idsva_so;", \
-                                 # fdsva_so - d2fd_dq2, d2fd_cross, d2fd_dqd2, d2fd_dtaudq
+                                 # fdsva_so - d2a_dq2, d2a_dv2, d2a_dvdq, d2a_dtdq
                                  "    T *d_df2;", \
                                  "    // CPU OUTPUTS", \
                                  "    T *h_c;", \
@@ -146,9 +146,9 @@ class GRiDCodeGenerator:
                                  "    T *h_df_du;", \
                                  "    T *h_eePos;", \
                                  "    T *h_deePos;", \
-                                 # idsva_so - d2tau_dq2, d2tau_dqd2, d2tau_cross, dM_dq
+                                 # idsva_so - d2tau_dq2, d2tau_dqd2, d2tau_dvdq, dM_dq
                                  "    T *h_idsva_so;", \
-                                 # fdsva_so - d2fd_dq2, d2fd_cross, d2fd_dqd2, d2fd_dtaudq
+                                 # fdsva_so - d2a_dq2, d2a_dv2, d2a_dvdq, d2a_dtdq
                                  "    T *h_df2;", \
                                  "};"])
 
@@ -171,7 +171,7 @@ class GRiDCodeGenerator:
                       "gpuErrchk(cudaMalloc((void**)&hd_data->d_df_du, NUM_JOINTS*2*NUM_JOINTS*NUM_TIMESTEPS*sizeof(T)));", \
                       "gpuErrchk(cudaMalloc((void**)&hd_data->d_eePos, 6*NUM_EES*NUM_TIMESTEPS*sizeof(T)));", \
                       "gpuErrchk(cudaMalloc((void**)&hd_data->d_deePos, 6*NUM_EES*NUM_JOINTS*NUM_TIMESTEPS*sizeof(T)));", \
-                      # idsva_so - d2tau_dq, d2tau_dqd, d2tau_cross, dM_dq
+                      # idsva_so - d2tau_dq, d2tau_dqd, d2tau_dvdq, dM_dq
                       "gpuErrchk(cudaMalloc((void**)&hd_data->d_idsva_so, 4*NUM_JOINTS*NUM_JOINTS*NUM_JOINTS*NUM_TIMESTEPS*sizeof(T)));", \
                       # fdsva_so - d2fd_dq2, d2fd_cross, d2fd_dqd2, d2fd_dtaudq
                       "gpuErrchk(cudaMalloc((void**)&hd_data->d_df2, 4*NUM_JOINTS*NUM_JOINTS*NUM_JOINTS*NUM_TIMESTEPS*sizeof(T)));", \
@@ -184,7 +184,7 @@ class GRiDCodeGenerator:
                       "hd_data->h_df_du = (T *)malloc(NUM_JOINTS*2*NUM_JOINTS*NUM_TIMESTEPS*sizeof(T));", \
                       "hd_data->h_eePos = (T *)malloc(6*NUM_EES*NUM_TIMESTEPS*sizeof(T));", \
                       "hd_data->h_deePos = (T *)malloc(6*NUM_EES*NUM_JOINTS*NUM_TIMESTEPS*sizeof(T));", \
-                      # idsva_so - d2tau_dq, d2tau_dqd, d2tau_cross, dM_dq
+                      # idsva_so - d2tau_dq, d2tau_dqd, d2tau_dvdq, dM_dq
                       "hd_data->h_idsva_so = (T *)malloc(4*NUM_JOINTS*NUM_JOINTS*NUM_JOINTS*NUM_TIMESTEPS*sizeof(T));", \
                       # fdsva_so - d2fd_dq2, d2fd_cross, d2fd_dqd2, d2fd_dtaudq
                       "hd_data->h_df2 = (T *)malloc(4*NUM_JOINTS*NUM_JOINTS*NUM_JOINTS*NUM_TIMESTEPS*sizeof(T));", \
@@ -251,7 +251,7 @@ class GRiDCodeGenerator:
                                  "gpuErrchk(cudaFree(hd_data->d_c)); gpuErrchk(cudaFree(hd_data->d_Minv)); gpuErrchk(cudaFree(hd_data->d_qdd));", \
                                  "gpuErrchk(cudaFree(hd_data->d_dc_du)); gpuErrchk(cudaFree(hd_data->d_df_du));", \
                                  "gpuErrchk(cudaFree(hd_data->d_eePos)); gpuErrchk(cudaFree(hd_data->d_deePos));", \
-                                # idsva_so - d2tau_dq, d2tau_dqd, d2tau_cross, dM_dq
+                                # idsva_so - d2tau_dq, d2tau_dqd, d2tau_dvdq, dM_dq
                                  "gpuErrchk(cudaFree(hd_data->d_idsva_so));", \
                                  # fdsva_so - d2fd_dq2, d2fd_cross, d2fd_dqd2, d2fd_dtaudq
                                     "gpuErrchk(cudaFree(hd_data->d_df2));", \

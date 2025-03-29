@@ -156,8 +156,8 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
         '// Final Tensors for Output',
         'T *d2tau_dq2 = s_idsva_so;', # Second positional derivative of the joint torques (NJxNJXNJ)',
         'T *d2tau_dqd2 = d2tau_dq2+ NUM_JOINTS*NUM_JOINTS*NUM_JOINTS;', # Second velocity derivative of the joint torques (NJxNJXNJ)',
-        'T *d2tau_cross = d2tau_dqd2 + NUM_JOINTS*NUM_JOINTS*NUM_JOINTS;', # Cross position/velocity derivative of the joint torques (NJxNJXNJ)',
-        'T *dM_dq = d2tau_cross + NUM_JOINTS*NUM_JOINTS*NUM_JOINTS;', # Positional Derivative of the mass matrix (NJxNJXNJ)',
+        'T *d2tau_dvdq = d2tau_dqd2 + NUM_JOINTS*NUM_JOINTS*NUM_JOINTS;', # Cross velocity/position derivative of the joint torques (NJxNJXNJ)',
+        'T *dM_dq = d2tau_dvdq + NUM_JOINTS*NUM_JOINTS*NUM_JOINTS;', # Positional Derivative of the mass matrix (NJxNJXNJ)',
     ]
     
     self.gen_add_code_lines(vars)
@@ -479,20 +479,20 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_code_line(f'int jids_compute[] = {{ {", ".join(map(str, jids))} }}; // Joints with ancestor at equivalent index of ancestors_j') 
     self.gen_add_code_line(f'int ancestors_j_compute[] = {{ {", ".join(map(str, ancestors))} }}; // Joint or ancestor of joint at equivalent index of jids')
     self.gen_add_code_line(f'int st[] = {{ {", ".join(map(str, st))} }}; // Subtree of joint at equivalent index of jids')
-    self.gen_add_code_lines(['// d2tau_cross[child, joint, ancestor] = -np.dot(t1, D3[:, child])', \
+    self.gen_add_code_lines(['// d2tau_dvdq[child, joint, ancestor] = -np.dot(t1, D3[:, child])', \
                              '// d2tau_dq[joint, ancestor, child] = np.dot(t1, D2[:, child])', \
                              '// d2tau_dq[joint, child, ancestor] = -np.dot(t1, D2[:, child])', \
-                             '// d2tau_cross[joint, child, ancestor] = np.dot(t1, D3[:, child])'])
+                             '// d2tau_dvdq[joint, child, ancestor] = np.dot(t1, D3[:, child])'])
     self.gen_add_parallel_loop('i',f'{4*len(jids)}',use_thread_group)
     self.gen_add_code_line(f'int index = i % {len(jids)};')
     self.gen_add_code_line(f'int jid = jids_compute[index];')
     self.gen_add_code_line(f'int ancestor_j = ancestors_j_compute[index];')
     self.gen_add_code_line(f'int st_j = st[index];')
     self.gen_add_code_line(f'int t_idx = ((jid*(jid+1)/2) + ancestor_j)*36;')
-    self.gen_add_code_line(f'if (i < {len(jids)}) d2tau_cross[st_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + ancestor_j] = -dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
+    self.gen_add_code_line(f'if (i < {len(jids)}) d2tau_dvdq[st_j*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + jid] = -dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
     self.gen_add_code_line(f'else if (i < {len(jids)*2} && jid != st_j) d2tau_dq2[jid*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + ancestor_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D2[st_j*36]);')
     self.gen_add_code_line(f'else if (i < {len(jids)*3} && jid != st_j) d2tau_dq2[jid*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + st_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D2[st_j*36]);')
-    self.gen_add_code_line(f'else if (jid != st_j) d2tau_cross[jid*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + ancestor_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
+    self.gen_add_code_line(f'else if (jid != st_j) d2tau_dvdq[jid*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + st_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
 
@@ -517,7 +517,7 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
                              '// for child d2tau_dqd[joint, ancestor, child] = np.dot(t2, D3[child])', \
                              '// for ancestor d2tau_dqd[child, joint, ancestor] = -np.dot(t2, D3[child])', \
                              '// for child d2tau_dqd[joint, child, ancestor] = np.dot(t2, D3[child])', \
-                             '// for child d2tau_cross[joint, ancestor, child] = np.dot(t2, D2[child])'])
+                             '// for child d2tau_dvdq[joint, ancestor, child] = np.dot(t2, D2[child])'])
     self.gen_add_parallel_loop('i',f'{5*len(jids)}',use_thread_group)
     self.gen_add_code_line(f'int index = i % {len(jids)};')
     self.gen_add_code_line(f'int jid = jids_compute[index];')
@@ -529,7 +529,7 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_code_line(f'else if (i < {2*len(jids)} && jid != st_j) d2tau_dqd2[jid*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + ancestor_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
     self.gen_add_code_line(f'else if (i < {3*len(jids)} && ancestor_j < jid) d2tau_dqd2[st_j*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + jid] = -dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
     self.gen_add_code_line(f'else if (i < {4*len(jids)} && jid != st_j) d2tau_dqd2[jid*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + st_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
-    self.gen_add_code_line(f'else if (i >= {4*len(jids)} && jid != st_j) d2tau_cross[jid*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + st_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D2[st_j*36]);')
+    self.gen_add_code_line(f'else if (i >= {4*len(jids)} && jid != st_j) d2tau_dvdq[jid*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + ancestor_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D2[st_j*36]);')
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
 
@@ -611,14 +611,14 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     # Perform all computations with t5
     self.gen_add_code_line('\n\n')
     self.gen_add_code_line('// Perform all computations with t5')
-    self.gen_add_code_lines(['// for child d2tau_cross[dd, cc, succ_j] += np.dot(t5, D1[:, succ_j])'])
+    self.gen_add_code_lines(['// for child d2tau_dvdq[dd, cc, succ_j] += np.dot(t5, D1[:, succ_j])'])
     self.gen_add_parallel_loop('i',f'{len(jids)}',use_thread_group)
     self.gen_add_code_line(f'int index = i % {len(jids)};')
     self.gen_add_code_line(f'int jid = jids_compute[index];')
     self.gen_add_code_line(f'int ancestor_j = ancestors_j_compute[index];')
     self.gen_add_code_line(f'int st_j = st[index];')
     self.gen_add_code_line(f'int t_idx = ((jid*(jid+1)/2) + ancestor_j)*36;')
-    self.gen_add_code_line(f'if (st_j != jid) d2tau_cross[jid*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + st_j] += dot_prod<T, 36, 1, 1>(&t[t_idx], &D1[st_j*36]);')
+    self.gen_add_code_line(f'if (st_j != jid) d2tau_dvdq[jid*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + ancestor_j] += dot_prod<T, 36, 1, 1>(&t[t_idx], &D1[st_j*36]);')
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
 
@@ -639,9 +639,9 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     # Perform all computations with t6
     self.gen_add_code_line('\n\n')
     self.gen_add_code_line('// Perform all computations with t6')
-    self.gen_add_code_lines(['// for ancestor d2tau_cross[st_j, cc, dd] = -np.dot(t6, D3[:, st_j])', \
+    self.gen_add_code_lines(['// for ancestor d2tau_dvdq[st_j, cc, dd] = -np.dot(t6, D3[:, st_j])', \
                              '// for ancestor d2tau_dq[cc, st_j, dd] = np.dot(t6, D2[:, st_j])', \
-                             '// for ancestor d2tau_cross[cc, st_j, dd] = np.dot(t6, D3[:, st_j])'])
+                             '// for ancestor d2tau_dvdq[cc, st_j, dd] = np.dot(t6, D3[:, st_j])'])
     self.gen_add_parallel_loop('i',f'{3*len(jids)}',use_thread_group)
     self.gen_add_code_line(f'int index = i % {len(jids)};')
     self.gen_add_code_line(f'int jid = jids_compute[index];')
@@ -649,9 +649,9 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_code_line(f'int st_j = st[index];')
     self.gen_add_code_line(f'int t_idx = ((jid*(jid+1)/2) + ancestor_j)*36;')
     self.gen_add_code_line('if (ancestor_j < jid) {', True)
-    self.gen_add_code_line(f'if (i < {len(jids)}) d2tau_cross[st_j*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + jid] = -dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
+    self.gen_add_code_line(f'if (i < {len(jids)}) d2tau_dvdq[st_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + ancestor_j] = -dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
     self.gen_add_code_line(f'else if (i < {2*len(jids)}) d2tau_dq2[ancestor_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + st_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D2[st_j*36]);')
-    self.gen_add_code_line('else d2tau_cross[ancestor_j*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + jid] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
+    self.gen_add_code_line('else d2tau_dvdq[ancestor_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + st_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
     self.gen_add_end_control_flow()
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
@@ -707,7 +707,7 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
                              '// for child dM_dq[dd, cc, succ_j] = np.dot(t8, D1[:, succ_j])'
                              '// for child & ancestor d2tau_dqd[cc, succ_j, dd] = np.dot(t8, D3[:, succ_j])', \
                              '// for child & ancestor d2tau_dqd[cc, dd, succ_j] = np.dot(t8, D3[:, succ_j])', \
-                             '// for child & ancestor d2tau_cross[cc, dd, succ_j] = np.dot(t8, D2[:, succ_j])'])
+                             '// for child & ancestor d2tau_dvdq[cc, dd, succ_j] = np.dot(t8, D2[:, succ_j])'])
     self.gen_add_parallel_loop('i',f'{7*len(jids)}',use_thread_group)
     self.gen_add_code_line(f'int index = i % {len(jids)};')
     self.gen_add_code_line(f'int jid = jids_compute[index];')
@@ -720,7 +720,7 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_code_line('if (st_j != jid) {', True)
     self.gen_add_code_line(f'if (i < {3*len(jids)}) d2tau_dqd2[ancestor_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + st_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
     self.gen_add_code_line(f'else if (i < {4*len(jids)}) d2tau_dqd2[ancestor_j*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + jid] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D3[st_j*36]);')
-    self.gen_add_code_line(f'else if (i < {5*len(jids)}) d2tau_cross[ancestor_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + st_j] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D2[st_j*36]);')
+    self.gen_add_code_line(f'else if (i < {5*len(jids)}) d2tau_dvdq[ancestor_j*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + jid] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D2[st_j*36]);')
     self.gen_add_end_control_flow()
     self.gen_add_end_control_flow()
     self.gen_add_code_line(f'if (jid != st_j && i < {6*len(jids)}) dM_dq[ancestor_j*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + jid] = dot_prod<T, 36, 1, 1>(&t[t_idx], &D1[st_j*36]);')
@@ -745,7 +745,7 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     # Perform all computations with t9
     self.gen_add_code_line('\n\n')
     self.gen_add_code_line('// Perform all computations with t9')
-    self.gen_add_code_lines(['// for ancestor & child d2tau_cross[cc, dd, succ_j] += np.dot(t9, D1[:, succ_j])', \
+    self.gen_add_code_lines(['// for ancestor & child d2tau_dvdq[cc, dd, succ_j] += np.dot(t9, D1[:, succ_j])', \
                              '// for ancestor & child d2tau_dq[cc, dd, succ_j] = d2tau_dq[cc, succ_j, dd]'])
     self.gen_add_parallel_loop('i',f'{2*len(jids)}',use_thread_group)
     self.gen_add_code_line(f'int index = i % {len(jids)};')
@@ -753,7 +753,7 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_code_line(f'int ancestor_j = ancestors_j_compute[index];')
     self.gen_add_code_line(f'int st_j = st[index];')
     self.gen_add_code_line(f'int t_idx = ((jid*(jid+1)/2) + ancestor_j)*36;')
-    self.gen_add_code_line(f'if (i < {len(jids)} && ancestor_j < jid && st_j != jid) d2tau_cross[ancestor_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + st_j] += dot_prod<T, 36, 1, 1>(&t[t_idx], &D1[st_j*36]);')
+    self.gen_add_code_line(f'if (i < {len(jids)} && ancestor_j < jid && st_j != jid) d2tau_dvdq[ancestor_j*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + jid] += dot_prod<T, 36, 1, 1>(&t[t_idx], &D1[st_j*36]);')
     self.gen_add_code_line(f'else if (ancestor_j < jid & st_j != jid) d2tau_dq2[ancestor_j*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + jid] = d2tau_dq2[ancestor_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + st_j];')
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
@@ -787,10 +787,10 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_code_line('// Finish all computations with p1..p5')
     self.gen_add_code_lines(['// for joint d2tau_dq[st_j, dd, cc] += -np.dot(p1, T2[:, st_j]) + np.dot(p2, T1[:, st_j])', \
                              '// for ancestor d2tau_dq[st_j, cc, dd] += -np.dot(p1, T2[:, st_j]) + np.dot(p2, T1[:, st_j])', \
-                             '// for ancestor d2tau_cross[st_j, cc, dd] += -np.dot(p3, T2[:, st_j]) + np.dot(p4, T1[:, st_j])', \
+                             '// for ancestor d2tau_dvdq[st_j, cc, dd] += -np.dot(p3, T2[:, st_j]) + np.dot(p4, T1[:, st_j])', \
                              '// for ancestor d2tau_dq[cc, st_j, dd] -= np.dot(p5, T3[:, st_j])', \
                              '// for ancestor && child d2tau_dq[cc, dd, succ_j] -= np.dot(p5, T3[:, st_j])', \
-                             '// for ancestor d2tau_cross[cc, st_j, dd] -= np.dot(p5, T4[:, st_j])'])
+                             '// for ancestor d2tau_dvdq[cc, st_j, dd] -= np.dot(p5, T4[:, st_j])'])
     self.gen_add_parallel_loop('i',f'{6*len(jids)}',use_thread_group)
     self.gen_add_code_line(f'int index = i % {len(jids)};')
     self.gen_add_code_line(f'int jid = jids_compute[index];')
@@ -800,10 +800,10 @@ def gen_idsva_so_inner(self, use_thread_group = False, use_qdd_input = False):
     self.gen_add_code_line(f'if (i < {len(jids)}) d2tau_dq2[st_j*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + jid] += -dot_prod<T, 6, 1, 1>(&p1[p_idx], &T2[st_j*6]) + dot_prod<T, 6, 1, 1>(&p2[p_idx], &T1[st_j*6]);')
     self.gen_add_code_line('else if (ancestor_j < jid) {', True)
     self.gen_add_code_line(f'if (i < {2*len(jids)}) d2tau_dq2[st_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + ancestor_j] += -dot_prod<T, 6, 1, 1>(&p1[p_idx], &T2[st_j*6]) + dot_prod<T, 6, 1, 1>(&p2[p_idx], &T1[st_j*6]);')
-    self.gen_add_code_line(f'else if (i < {3*len(jids)}) d2tau_cross[st_j*NUM_JOINTS*NUM_JOINTS + ancestor_j * NUM_JOINTS + jid] += -dot_prod<T, 6, 1, 1>(&p3[p_idx], &T2[st_j*6]) + dot_prod<T, 6, 1, 1>(&p4[p_idx], &T1[st_j*6]);')
+    self.gen_add_code_line(f'else if (i < {3*len(jids)}) d2tau_dvdq[st_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + ancestor_j] += -dot_prod<T, 6, 1, 1>(&p3[p_idx], &T2[st_j*6]) + dot_prod<T, 6, 1, 1>(&p4[p_idx], &T1[st_j*6]);')
     self.gen_add_code_line(f'else if (i < {4*len(jids)}) d2tau_dq2[ancestor_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + st_j] -= dot_prod<T, 6, 1, 1>(&p5[p_idx], &T3[st_j*6]);')
     self.gen_add_code_line(f'else if (i < {5*len(jids)} && st_j != jid) d2tau_dq2[ancestor_j*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + jid] -= dot_prod<T, 6, 1, 1>(&p5[p_idx], &T3[st_j*6]);')
-    self.gen_add_code_line(f'else if (i >= {5*len(jids)}) d2tau_cross[ancestor_j*NUM_JOINTS*NUM_JOINTS + st_j * NUM_JOINTS + jid] -= dot_prod<T, 6, 1, 1>(&p5[p_idx], &T4[st_j*6]);')
+    self.gen_add_code_line(f'else if (i >= {5*len(jids)}) d2tau_dvdq[ancestor_j*NUM_JOINTS*NUM_JOINTS + jid * NUM_JOINTS + st_j] -= dot_prod<T, 6, 1, 1>(&p5[p_idx], &T4[st_j*6]);')
     self.gen_add_end_control_flow()
     self.gen_add_end_control_flow()
     self.gen_add_sync(use_thread_group)
