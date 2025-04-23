@@ -254,8 +254,8 @@ class GRiDCodeGenerator:
                                 # idsva_so - d2tau_dq, d2tau_dqd, d2tau_dvdq, dM_dq
                                  "gpuErrchk(cudaFree(hd_data->d_idsva_so));", \
                                  # fdsva_so - d2fd_dq2, d2fd_cross, d2fd_dqd2, d2fd_dtaudq
-                                    "gpuErrchk(cudaFree(hd_data->d_df2));", \
-                                 "free(hd_data->h_idsva_so);", \
+                                 "gpuErrchk(cudaFree(hd_data->d_df2));", \
+                                 "free(hd_data->h_idsva_so); free(hd_data->h_df2);", \
                                  "free(hd_data->h_q_qd_u); free(hd_data->h_q_qd); free(hd_data->h_q);", \
                                  "free(hd_data->h_c); free(hd_data->h_Minv); free(hd_data->h_qdd);", \
                                  "free(hd_data->h_dc_du); free(hd_data->h_df_du);",\
@@ -406,10 +406,8 @@ class GRiDCodeGenerator:
         else:
             self.gen_aba(use_thread_group)
             self.gen_crba(use_thread_group)
-            if self.robot.is_serial_chain():
-                self.gen_idsva_so(use_thread_group)
-                self.gen_fdsva_so(use_thread_group)
-            else: print('idsva-so is still under development for branching robots')
+            self.gen_idsva_so(use_thread_group)
+            self.gen_fdsva_so(use_thread_group)
         # then finally the master init and close the namespace
         self.gen_init_close_grid()
         self.gen_add_end_control_flow()

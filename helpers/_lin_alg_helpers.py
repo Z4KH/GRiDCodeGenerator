@@ -62,7 +62,7 @@ def gen_matmul(self):
     self.gen_add_code_line("template <typename T>")
     self.gen_add_code_line("__device__")
     self.gen_add_code_line("void matmul(int index, T *A, T *B, T *dest, int num, bool t) {", True)
-    self.gen_add_code_line("int cur = 36*((index/num)%7);")
+    self.gen_add_code_line("int cur = 36*((index/num)%NUM_JOINTS);")
     self.gen_add_code_line("T *vec1 = &B[cur + (t*5+1)*(index%6)];")
     self.gen_add_code_line("T *vec2 = &A[6*(index/6)];")
     self.gen_add_code_line("dest[index] = dot_prod<T,6, 6, 1>(vec1, vec2);")
