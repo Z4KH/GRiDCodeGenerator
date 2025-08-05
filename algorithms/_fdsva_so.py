@@ -86,14 +86,12 @@ def gen_fdsva_so_inner(self, use_thread_group = False):
 
 def gen_fdsva_so_device_temp_mem_size(self):
     # Same as idsva_so because idsva_so is called and takes more memory
+    return self.gen_fdsva_so_inner_temp_mem_size()
+    
+def gen_fdsva_so_inner_temp_mem_size(self):
     NV = self.robot.get_num_vel()
     jids_a, ancestors = self.robot.get_jid_ancestor_ids(include_joint=True)
     return int(36 * NV * 10 + 30 * NV + 6 + len(jids_a)*36)
-    
-def gen_fdsva_so_inner_temp_mem_size(self):
-    # TODO - should be actual amount required by inner function
-    # For now, just use device
-    return self.gen_fdsva_so_device_temp_mem_size()
     
 def gen_fdsva_so_inner_function_call(self, use_thread_group = False, updated_var_names = None):
     var_names = dict( \
