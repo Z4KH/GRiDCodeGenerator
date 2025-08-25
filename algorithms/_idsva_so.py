@@ -1071,7 +1071,10 @@ def gen_idsva_so_host(self, mode = 0):
     self.gen_add_code_line("// then call the kernel")
     # TODO - qdd=0 optimization
     
-    func_call_code = [f'{func_call_start}{func_call_end}']
+    # then compute:
+    self.gen_add_code_line("// call the kernel")
+    func_call = func_call_start + func_call_end
+    func_call_code = [func_call, "gpuErrchk(cudaDeviceSynchronize());"]
     # wrap function call in timing (if needed)
     if single_call_timing:
         func_call_code.insert(0,"struct timespec start, end; clock_gettime(CLOCK_MONOTONIC,&start);")
